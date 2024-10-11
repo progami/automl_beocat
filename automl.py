@@ -1,317 +1,285 @@
-# Save this code as automl_app.py
+# automl.py
 
-import streamlit as st
+import os
 import pandas as pd
 import numpy as np
-import optuna
+import pickle
+import subprocess
+import re
+import time
+import datetime
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+import streamlit as st
+
 
 def main():
-    st.title("AutoML App")
+    st.title("AutoML on Beocat")
+    print("Starting AutoML on Beocat application...")  # Console output
 
-    # File uploader for dataset
-    uploaded_file = st.file_uploader("Please upload your dataset (CSV format):", type=["csv"])
-
+    # Allow user to upload a dataset
+    st.header("Dataset Selection")
+    uploaded_file = st.file_uploader("Upload a CSV file", type=['csv'])
     if uploaded_file is not None:
-        # Read the uploaded CSV file
+        # User uploaded a file
         data = pd.read_csv(uploaded_file)
         st.success("Dataset uploaded successfully.")
-
-        # Select the target column
-        target_column = st.selectbox("Select the target (label) column:", data.columns)
-
-        if target_column:
-            # Select the task type
-            task_type = st.radio("Is this a regression or classification task?", ('Regression', 'Classification'))
-
-            # Select algorithms to train
-            if task_type == 'Regression':
-                algorithms = st.multiselect(
-                    "Select algorithms to train:",
-                    ['Linear Regression'],
-                    default=['Linear Regression']
-                )
-            else:
-                algorithms = st.multiselect(
-                    "Select algorithms to train:",
-                    ['Logistic Regression'],
-                    default=['Logistic Regression']
-                )
-
-            if algorithms:
-                if st.button("Start Training"):
-                    # Preprocess the data
-                    X = data.drop(columns=[target_column])
-                    y = data[target_column]
-
-                    # Encode categorical features using pandas
-                    X = pd.get_dummies(X)
-
-                    # Feature scaling using PyTorch
-                    X = X.values.astype(np.float32)
-                    X_mean = X.mean(axis=0)
-                    X_std = X.std(axis=0) + 1e-8  # Add epsilon to avoid division by zero
-                    X = (X - X_mean) / X_std
-
-                    # Convert to PyTorch tensors
-                    X = torch.tensor(X, dtype=torch.float32)
-
-                    # Process the target variable
-                    if task_type == 'Classification':
-                        # Encode target labels
-                        if y.dtype == 'object':
-                            y = pd.Categorical(y).codes
-                        else:
-                            y = y.astype(int)
-                        y = torch.tensor(y.values, dtype=torch.long)
-                    else:
-                        y = y.values.reshape(-1, 1).astype(np.float32)
-                        y = torch.tensor(y, dtype=torch.float32)
-
-                    # Split the data
-                    dataset = TensorDataset(X, y)
-                    train_size = int(0.8 * len(dataset))
-                    test_size = len(dataset) - train_size
-                    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-
-                    X_train, y_train = train_dataset[:]
-                    X_test, y_test = test_dataset[:]
-
-                    # Initialize a list to store results
-                    results = []
-
-                    # Iterate over the selected algorithms
-                    for algorithm in algorithms:
-                        with st.spinner(f"Training {algorithm}..."):
-                            best_model, best_params = optimize_model(algorithm, task_type, X_train, y_train)
-                            y_pred = best_model(X_test).detach()
-
-                            st.success(f"Training completed for {algorithm}.")
-
-                            st.subheader(f"{algorithm} - Best Hyperparameters:")
-                            st.write(best_params)
-
-                            if task_type == 'Regression':
-                                # Evaluation metrics
-                                y_pred_np = y_pred.numpy()
-                                y_test_np = y_test.numpy()
-
-                                mse = np.mean((y_pred_np - y_test_np) ** 2)
-                                rmse = np.sqrt(mse)
-                                ss_total = np.sum((y_test_np - y_test_np.mean()) ** 2)
-                                ss_res = np.sum((y_test_np - y_pred_np) ** 2)
-                                r2 = 1 - (ss_res / ss_total)
-
-                                st.subheader(f"{algorithm} - Regression Results:")
-                                st.write(f"Mean Squared Error (MSE): {mse:.4f}")
-                                st.write(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
-                                st.write(f"R-squared (R²): {r2:.4f}")
-
-                                # Append results to the list
-                                results.append({
-                                    'Algorithm': algorithm,
-                                    'MSE': mse,
-                                    'RMSE': rmse,
-                                    'R2': r2,
-                                    'Best Params': best_params
-                                })
-                            else:
-                                # Convert logits to class labels
-                                y_pred_labels = torch.argmax(y_pred, dim=1)
-                                y_test_labels = y_test
-
-                                # Evaluation metrics
-                                accuracy = (y_pred_labels == y_test_labels).sum().item() / len(y_test_labels)
-                                report = classification_report_numpy(y_test_labels.numpy(), y_pred_labels.numpy())
-                                conf_matrix = confusion_matrix_numpy(y_test_labels.numpy(), y_pred_labels.numpy())
-
-                                st.subheader(f"{algorithm} - Classification Results:")
-                                st.write(f"Accuracy: {accuracy:.4f}")
-
-                                st.subheader("Classification Report:")
-                                st.dataframe(pd.DataFrame(report).transpose())
-
-                                st.subheader("Confusion Matrix:")
-                                st.write(conf_matrix)
-
-                                # Append results to the list
-                                results.append({
-                                    'Algorithm': algorithm,
-                                    'Accuracy': accuracy,
-                                    'Best Params': best_params
-                                })
-
-                    # Display a summary table of results
-                    st.subheader("Summary:")
-                    if task_type == 'Regression':
-                        st.dataframe(pd.DataFrame(results).sort_values(by='RMSE'))
-                    else:
-                        st.dataframe(pd.DataFrame(results).sort_values(by='Accuracy', ascending=False))
-                else:
-                    st.warning("Please click 'Start Training' to begin.")
-            else:
-                st.warning("Please select at least one algorithm to train.")
-        else:
-            st.warning("Please select a target column.")
+        print("Dataset uploaded successfully.")  # Console output
     else:
-        st.info("Awaiting for CSV file to be uploaded.")
+        st.warning("Please upload a dataset to proceed.")
+        print("Awaiting dataset upload...")  # Console output
+        return
 
-def optimize_model(algorithm, task_type, X_train, y_train):
-    def objective(trial):
-        # Common hyperparameters
-        learning_rate = trial.suggest_loguniform('learning_rate', 1e-5, 1e-1)
-        batch_size = trial.suggest_categorical('batch_size', [16, 32, 64, 128])
-        epochs = trial.suggest_int('epochs', 50, 200)
+    # Display columns and let user select target column
+    st.header("Select Target Column")
+    columns = data.columns.tolist()
+    if not columns:
+        st.error("The uploaded dataset does not contain any columns.")
+        print("Error: The uploaded dataset does not contain any columns.")  # Console output
+        return
+    target_column = st.selectbox("Select the target (label) column:", columns)
 
-        if algorithm == 'Linear Regression':
-            # Hyperparameter: fit_intercept
-            fit_intercept = trial.suggest_categorical('fit_intercept', [True, False])
+    # Select task type
+    st.header("Select Task Type")
+    task_type = st.radio("Is this a regression or classification task?", ('Regression', 'Classification'))
 
-            # Define model
-            model = LinearRegressionModel(X_train.shape[1], fit_intercept)
-
-            # Optimizer
-            optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-
-            # Loss function
-            loss_fn = nn.MSELoss()
-
-        elif algorithm == 'Logistic Regression':
-            # Hyperparameter: C (Inverse of regularization strength)
-            C = trial.suggest_loguniform('C', 1e-4, 1e2)
-
-            # Define model
-            num_classes = len(torch.unique(y_train))
-            model = LogisticRegressionModel(X_train.shape[1], num_classes)
-
-            # Optimizer with weight decay as regularization
-            optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=1.0 / C)
-
-            # Loss function
-            loss_fn = nn.CrossEntropyLoss()
-        else:
-            return None
-
-        # DataLoader
-        dataset = TensorDataset(X_train, y_train)
-        dataloader = DataLoader(dataset, batch_size=int(batch_size), shuffle=True)
-
-        # Training loop
-        model.train()
-        for epoch in range(epochs):
-            for batch_X, batch_y in dataloader:
-                optimizer.zero_grad()
-                outputs = model(batch_X)
-                loss = loss_fn(outputs, batch_y)
-                loss.backward()
-                optimizer.step()
-
-        # Validation
-        model.eval()
-        with torch.no_grad():
-            val_outputs = model(X_train)
-            if task_type == 'Regression':
-                val_loss = loss_fn(val_outputs, y_train).item()
-                return -val_loss  # Negative MSE for maximization
-            else:
-                val_preds = torch.argmax(val_outputs, dim=1)
-                accuracy = (val_preds == y_train).sum().item() / len(y_train)
-                return accuracy  # Maximize accuracy
-
-    # Create an Optuna study and optimize
+    # Select algorithms
+    st.header("Select Algorithms")
     if task_type == 'Regression':
-        study = optuna.create_study(direction='maximize')
+        algorithms = st.multiselect("Select algorithms to train:", ['Linear Regression', 'Random Forest Regressor', 'Neural Network'], default=['Linear Regression'])
     else:
-        study = optuna.create_study(direction='maximize')
+        algorithms = st.multiselect("Select algorithms to train:", ['Logistic Regression', 'Random Forest Classifier', 'Neural Network'], default=['Logistic Regression'])
 
-    study.optimize(objective, n_trials=20)
+    if not algorithms:
+        st.warning("Please select at least one algorithm.")
+        print("No algorithms selected.")  # Console output
+        return
 
-    best_params = study.best_params
+    # Partition selection
+    st.header("SLURM Partition Selection")
+    partitions = ['batch.q', 'killable.q', 'interact.q', 'vis.q']
+    selected_partition = st.selectbox("Select a partition for your job:", partitions, index=0)
+    st.info(f"Selected partition: {selected_partition}")
+    print(f"Selected partition: {selected_partition}")  # Console output
 
-    # Train the final model with the best hyperparameters
-    learning_rate = best_params['learning_rate']
-    batch_size = best_params['batch_size']
-    epochs = best_params['epochs']
+    # Resource specifications
+    st.header("Resource Specifications")
+    time_limit = st.text_input("Enter time limit (e.g., 01:00:00 for 1 hour):", value="01:00:00")
+    memory_per_cpu = st.text_input("Enter memory per CPU (e.g., 4G for 4 GB):", value="4G")
+    cpus_per_task = st.number_input("Enter number of CPUs per task:", min_value=1, max_value=32, value=1)
 
-    if algorithm == 'Linear Regression':
-        fit_intercept = best_params['fit_intercept']
-        model = LinearRegressionModel(X_train.shape[1], fit_intercept)
-        optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-        loss_fn = nn.MSELoss()
-    elif algorithm == 'Logistic Regression':
-        C = best_params['C']
-        num_classes = len(torch.unique(y_train))
-        model = LogisticRegressionModel(X_train.shape[1], num_classes)
-        optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=1.0 / C)
-        loss_fn = nn.CrossEntropyLoss()
+    # Start training button
+    if st.button("Start Training"):
+        st.info("Preparing data and submitting job(s) to SLURM...")
+        print("Preparing data and submitting job(s) to SLURM...")  # Console output
+
+        # Create a unique main job directory
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        main_job_dir = f"run_{timestamp}"
+        os.makedirs(main_job_dir, exist_ok=True)
+        print(f"Created main job directory: {main_job_dir}")  # Console output
+
+        # Preprocess the data
+        try:
+            X = data.drop(columns=[target_column])
+            y = data[target_column]
+        except KeyError:
+            st.error(f"Target column '{target_column}' not found in the dataset.")
+            print(f"Error: Target column '{target_column}' not found in the dataset.")  # Console output
+            return
+
+        # Encode categorical features
+        X = pd.get_dummies(X)
+
+        # Feature scaling
+        X = X.values.astype(np.float32)
+        X_mean = X.mean(axis=0)
+        X_std = X.std(axis=0) + 1e-8  # Avoid division by zero
+        X = (X - X_mean) / X_std
+
+        # Convert to PyTorch tensors
+        X = torch.tensor(X, dtype=torch.float32)
+
+        # Process target variable
+        if task_type == 'Classification':
+            # Encode target labels
+            if y.dtype == 'object':
+                y = pd.Categorical(y).codes
+            else:
+                y = y.astype(int)
+            y = torch.tensor(y.values, dtype=torch.long)
+        else:
+            y = y.values.reshape(-1, 1).astype(np.float32)
+            y = torch.tensor(y, dtype=torch.float32)
+
+        # Split the data
+        dataset = TensorDataset(X, y)
+        if len(dataset) < 2:
+            st.error("The dataset is too small to split into training and testing sets.")
+            print("Error: The dataset is too small to split into training and testing sets.")  # Console output
+            return
+        train_size = int(0.8 * len(dataset))
+        test_size = len(dataset) - train_size
+        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+
+        X_train, y_train = zip(*train_dataset)
+        X_train = torch.stack(X_train)
+        y_train = torch.stack(y_train)
+
+        X_test, y_test = zip(*test_dataset)
+        X_test = torch.stack(X_test)
+        y_test = torch.stack(y_test)
+
+        # Save data and task_type in the main job directory
+        with open(os.path.join(main_job_dir, 'data.pkl'), 'wb') as f:
+            pickle.dump((X_train, y_train, X_test, y_test), f)
+        with open(os.path.join(main_job_dir, 'params.pkl'), 'wb') as f:
+            pickle.dump({'task_type': task_type}, f)
+        print("Data and task_type saved.")  # Console output
+
+        # Iterate over selected algorithms and submit a job for each
+        job_ids = []
+        for algorithm in algorithms:
+            st.info(f"Submitting job for algorithm: {algorithm}")
+            print(f"Submitting job for algorithm: {algorithm}")
+
+            # Create a directory for this algorithm's job inside the main job directory
+            algorithm_safe = algorithm.replace(' ', '_').lower()
+            job_dir = os.path.join(main_job_dir, algorithm_safe)
+            os.makedirs(job_dir, exist_ok=True)
+
+            # Generate SLURM script for this algorithm
+            slurm_script_content = generate_slurm_script(
+                job_name=f'automl_job_{algorithm_safe}_{timestamp}',
+                script_path=os.path.abspath('training.py'),  # Use absolute path
+                output_path=os.path.join(job_dir, 'slurm_output.txt'),
+                error_path=os.path.join(job_dir, 'slurm_error.txt'),
+                partition=selected_partition,
+                time=time_limit,
+                mem_per_cpu=memory_per_cpu,
+                cpus_per_task=cpus_per_task,
+                job_dir=os.path.abspath(job_dir),
+                algorithm=algorithm,
+                main_job_dir=os.path.abspath(main_job_dir)
+            )
+
+            # Save the SLURM script to the job directory
+            slurm_script_path = os.path.join(job_dir, 'job.slurm')
+            with open(slurm_script_path, 'w') as f:
+                f.write(slurm_script_content)
+            print(f"SLURM script for {algorithm} saved as '{slurm_script_path}'.")
+
+            # Submit the job
+            submit_command = ['sbatch', slurm_script_path]
+            result = subprocess.run(submit_command, capture_output=True, text=True)
+            st.text(result.stdout)
+            print(result.stdout)
+            if result.returncode != 0:
+                st.error(f"Job submission failed for {algorithm}: {result.stderr}")
+                print(f"Job submission failed for {algorithm}: {result.stderr}")
+            else:
+                # Extract job ID from output
+                job_id = parse_job_id(result.stdout)
+                if job_id:
+                    st.success(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
+                    print(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
+                    job_ids.append((job_id, algorithm, job_dir))
+                else:
+                    st.error(f"Could not parse job ID for {algorithm} from submission output.")
+                    print(f"Error: Could not parse job ID for {algorithm} from submission output.")
+
+        # Monitor all submitted jobs
+        for job_id, algorithm, job_dir in job_ids:
+            st.info(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
+            print(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
+            job_complete = monitor_job(job_id)
+            if job_complete:
+                st.success(f"Job completed successfully for {algorithm}.")
+                print(f"Job completed successfully for {algorithm}.")
+                # Load and display results
+                results_path = os.path.join(job_dir, 'results.pkl')
+                if os.path.exists(results_path):
+                    with open(results_path, 'rb') as f:
+                        results = pickle.load(f)
+                    display_results([results], task_type)
+                else:
+                    st.error(f"Results file not found for {algorithm}.")
+                    print(f"Error: Results file not found for {algorithm}.")
+            else:
+                st.error(f"Job did not complete successfully for {algorithm}.")
+                print(f"Error: Job did not complete successfully for {algorithm}.")
+
+def generate_slurm_script(job_name, script_path, output_path, error_path, partition='batch.q', time='01:00:00', mem_per_cpu='4G', cpus_per_task=1, job_dir='', algorithm='', main_job_dir=''):
+    slurm_script = f"""#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --output={output_path}
+#SBATCH --error={error_path}
+#SBATCH --time={time}
+#SBATCH --partition={partition}
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --mem-per-cpu={mem_per_cpu}
+
+module load Python/3.10.4-GCCcore-11.3.0  # Adjust based on available modules
+source ~/virtualenvs/automl_env/bin/activate
+
+cd {job_dir}
+
+python {script_path} --job_dir {job_dir} --algorithm "{algorithm}" --main_job_dir {main_job_dir}
+"""
+    return slurm_script
+
+def parse_job_id(submission_output):
+    # Example output: "Submitted batch job 123456"
+    match = re.search(r'Submitted batch job (\d+)', submission_output)
+    if match:
+        return match.group(1)
     else:
-        return None, {}
+        return None
 
-    # DataLoader
-    dataset = TensorDataset(X_train, y_train)
-    dataloader = DataLoader(dataset, batch_size=int(batch_size), shuffle=True)
+def monitor_job(job_id):
+    import subprocess
+    import time
 
-    # Training loop
-    model.train()
-    for epoch in range(epochs):
-        for batch_X, batch_y in dataloader:
-            optimizer.zero_grad()
-            outputs = model(batch_X)
-            loss = loss_fn(outputs, batch_y)
-            loss.backward()
-            optimizer.step()
+    job_running = True
+    while job_running:
+        result = subprocess.run(['squeue', '-j', str(job_id)], capture_output=True, text=True)
+        if str(job_id) in result.stdout:
+            print(f"Job {job_id} is still running...")  # Console output
+            time.sleep(30)  # Wait before checking again
+        else:
+            job_running = False
+    # Optionally, check slurm_output.txt or slurm_error.txt for details
+    return True
 
-    return model.eval(), best_params
-
-class LinearRegressionModel(nn.Module):
-    def __init__(self, input_dim, fit_intercept=True):
-        super(LinearRegressionModel, self).__init__()
-        self.linear = nn.Linear(input_dim, 1, bias=fit_intercept)
-
-    def forward(self, x):
-        return self.linear(x)
-
-class LogisticRegressionModel(nn.Module):
-    def __init__(self, input_dim, num_classes):
-        super(LogisticRegressionModel, self).__init__()
-        self.linear = nn.Linear(input_dim, num_classes)
-
-    def forward(self, x):
-        return self.linear(x)
-
-def classification_report_numpy(y_true, y_pred):
-    # Calculate precision, recall, f1-score
-    classes = np.unique(y_true)
-    report = {}
-    for cls in classes:
-        tp = np.sum((y_pred == cls) & (y_true == cls))
-        fp = np.sum((y_pred == cls) & (y_true != cls))
-        fn = np.sum((y_pred != cls) & (y_true == cls))
-        precision = tp / (tp + fp + 1e-8)
-        recall = tp / (tp + fn + 1e-8)
-        f1 = 2 * precision * recall / (precision + recall + 1e-8)
-        support = np.sum(y_true == cls)
-        report[cls] = {
-            'precision': precision,
-            'recall': recall,
-            'f1-score': f1,
-            'support': support
-        }
-    # Add accuracy
-    accuracy = np.sum(y_true == y_pred) / len(y_true)
-    report['accuracy'] = {'precision': accuracy}
-    return report
-
-def confusion_matrix_numpy(y_true, y_pred):
-    classes = np.unique(y_true)
-    matrix = np.zeros((len(classes), len(classes)), dtype=int)
-    for i, cls_true in enumerate(classes):
-        for j, cls_pred in enumerate(classes):
-            matrix[i, j] = np.sum((y_true == cls_true) & (y_pred == cls_pred))
-    return matrix
+def display_results(results, task_type):
+    for result in results:
+        st.write(f"### Algorithm: {result['Algorithm']}")
+        print(f"Algorithm: {result['Algorithm']}")  # Console output
+        if task_type == 'Regression':
+            st.write(f"**Mean Squared Error (MSE)**: {result['MSE']:.4f}")
+            st.write(f"**Root Mean Squared Error (RMSE)**: {result['RMSE']:.4f}")
+            st.write(f"**R-squared (R²)**: {result['R2']:.4f}")
+            print(f"Mean Squared Error (MSE): {result['MSE']:.4f}")  # Console output
+            print(f"Root Mean Squared Error (RMSE): {result['RMSE']:.4f}")  # Console output
+            print(f"R-squared (R²): {result['R2']:.4f}")  # Console output
+        else:
+            st.write(f"**Accuracy**: {result['Accuracy']:.4f}")
+            st.write("**Classification Report:**")
+            st.dataframe(pd.DataFrame(result['Classification Report']).transpose())
+            st.write("**Confusion Matrix:**")
+            st.write(result['Confusion Matrix'])
+            print(f"Accuracy: {result['Accuracy']:.4f}")  # Console output
+            print("Classification Report:")  # Console output
+            print(pd.DataFrame(result['Classification Report']).transpose())  # Console output
+            print("Confusion Matrix:")  # Console output
+            print(result['Confusion Matrix'])  # Console output
+        st.write("**Best Hyperparameters:**")
+        st.write(result['Best Params'])
+        print("Best Hyperparameters:")  # Console output
+        print(result['Best Params'])  # Console output
 
 if __name__ == '__main__':
     main()
