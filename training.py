@@ -1,5 +1,3 @@
-# training.py
-
 import argparse
 import os
 import pickle
@@ -8,164 +6,54 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import numpy as np
-import pandas as pd
 
 def main():
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Training script for AutoML')
-    parser.add_argument('--job_dir', type=str, required=True, help='Job directory where outputs are stored')
-    parser.add_argument('--algorithm', type=str, required=True, help='Algorithm to train')
+    parser = argparse.ArgumentParser(description='Training script for AutoML Job Array')
+    parser.add_argument('--task_id', type=int, required=True, help='SLURM Array Task ID')
+    parser.add_argument('--total_tasks', type=int, required=True, help='Total number of tasks')
     parser.add_argument('--main_job_dir', type=str, required=True, help='Main job directory where data and params are stored')
     args = parser.parse_args()
 
-    job_dir = args.job_dir
-    algorithm = args.algorithm
+    task_id = args.task_id
     main_job_dir = args.main_job_dir
-    print(f"Job directory: {job_dir}")
-    print(f"Algorithm: {algorithm}")
+
+    print(f"Task ID: {task_id}")
     print(f"Main job directory: {main_job_dir}")
 
-    # Load data and task_type from main_job_dir
+    # Load data and parameters
     with open(os.path.join(main_job_dir, 'data.pkl'), 'rb') as f:
         X_train, y_train, X_test, y_test = pickle.load(f)
     with open(os.path.join(main_job_dir, 'params.pkl'), 'rb') as f:
         params = pickle.load(f)
-
     task_type = params['task_type']
 
-    # Train the neural network
-    print(f"Training {algorithm}...")
-    best_model, best_params = optimize_model(task_type, X_train, y_train, X_test, y_test)
-    print(f"Training completed for {algorithm}.")
+    # Load hyperparameter combinations
+    with open(os.path.join(main_job_dir, 'combinations.pkl'), 'rb') as f:
+        combinations = pickle.load(f)
 
-    # Evaluate the model
-    if task_type == 'Regression':
-        # Evaluation metrics
-        y_pred = best_model(X_test).detach().numpy()
-        y_test_np = y_test.numpy()
+    # Get the hyperparameter combination for this task
+    hyperparams = combinations[task_id]
 
-        mse = np.mean((y_pred - y_test_np.ravel()) ** 2)
-        rmse = np.sqrt(mse)
-        ss_total = np.sum((y_test_np - y_test_np.mean()) ** 2)
-        ss_res = np.sum((y_test_np - y_pred.reshape(-1, 1)) ** 2)
-        r2 = 1 - (ss_res / ss_total)
+    # Unpack hyperparameters
+    learning_rate, batch_size, epochs, hidden_size, optimizer_name, loss_function_name = hyperparams
 
-        print(f"{algorithm} - Regression Results:")
-        print(f"Mean Squared Error (MSE): {mse:.4f}")
-        print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
-        print(f"R-squared (R²): {r2:.4f}")
+    print(f"Hyperparameters for Task ID {task_id}:")
+    print(f"Learning Rate: {learning_rate}")
+    print(f"Batch Size: {batch_size}")
+    print(f"Epochs: {epochs}")
+    print(f"Hidden Size: {hidden_size}")
+    print(f"Optimizer: {optimizer_name}")
+    print(f"Loss Function: {loss_function_name}")
 
-        # Prepare results
-        results = {
-            'Algorithm': algorithm,
-            'MSE': mse,
-            'RMSE': rmse,
-            'R2': r2,
-            'Best Params': best_params
-        }
-    else:
-        # Evaluation metrics
-        y_pred = best_model(X_test).detach()
-        y_pred_labels = torch.argmax(y_pred, dim=1).numpy()
-        y_test_labels = y_test.numpy()
-
-        accuracy = np.mean(y_pred_labels == y_test_labels)
-        report = classification_report_numpy(y_test_labels, y_pred_labels)
-        conf_matrix = confusion_matrix_numpy(y_test_labels, y_pred_labels)
-
-        print(f"{algorithm} - Classification Results:")
-        print(f"Accuracy: {accuracy:.4f}")
-
-        # Prepare results
-        results = {
-            'Algorithm': algorithm,
-            'Accuracy': accuracy,
-            'Best Params': best_params,
-            'Classification Report': report,
-            'Confusion Matrix': conf_matrix
-        }
-
-    # Save results
-    with open(os.path.join(job_dir, 'results.pkl'), 'wb') as f:
-        pickle.dump(results, f)
-    print("Training completed. Results saved to 'results.pkl'.")
-
-def optimize_model(task_type, X_train, y_train, X_test, y_test):
-    import optuna
-
-    def objective(trial):
-        hidden_size = trial.suggest_int('hidden_size', 10, 100)
-        learning_rate = trial.suggest_loguniform('learning_rate', 1e-5, 1e-1)
-        epochs = trial.suggest_int('epochs', 50, 200)
-        batch_size = trial.suggest_int('batch_size', 16, 128)
-
-        if task_type == 'Regression':
-            model = nn.Sequential(
-                nn.Linear(X_train.shape[1], hidden_size),
-                nn.ReLU(),
-                nn.Linear(hidden_size, 1)
-            )
-            loss_fn = nn.MSELoss()
-        else:
-            num_classes = len(torch.unique(y_train))
-            model = nn.Sequential(
-                nn.Linear(X_train.shape[1], hidden_size),
-                nn.ReLU(),
-                nn.Linear(hidden_size, num_classes)
-            )
-            loss_fn = nn.CrossEntropyLoss()
-
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-        # DataLoader
-        dataset = torch.utils.data.TensorDataset(X_train, y_train)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-        # Training loop
-        model.train()
-        for epoch in range(epochs):
-            epoch_loss = 0.0
-            for batch_X, batch_y in dataloader:
-                optimizer.zero_grad()
-                outputs = model(batch_X)
-                loss = loss_fn(outputs, batch_y)
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
-            # Optionally, print epoch loss
-            # print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss/len(dataloader):.4f}")
-
-        # Validation
-        model.eval()
-        with torch.no_grad():
-            val_outputs = model(X_test)
-            if task_type == 'Regression':
-                val_loss = loss_fn(val_outputs, y_test).item()
-                return val_loss  # MSE for minimization
-            else:
-                val_preds = torch.argmax(val_outputs, dim=1)
-                accuracy = (val_preds == y_test).sum().item() / len(y_test)
-                return 1.0 - accuracy  # 1 - accuracy for minimization
-
-    # Create an Optuna study and optimize
-    study = optuna.create_study()
-    study.optimize(objective, n_trials=20)
-
-    best_params = study.best_params
-
-    # Train the final model with the best hyperparameters
-    hidden_size = best_params['hidden_size']
-    learning_rate = best_params['learning_rate']
-    epochs = best_params['epochs']
-    batch_size = best_params['batch_size']
-
+    # Proceed with training using these hyperparameters
     if task_type == 'Regression':
         model = nn.Sequential(
             nn.Linear(X_train.shape[1], hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, 1)
         )
-        loss_fn = nn.MSELoss()
+        loss_fn = getattr(nn, loss_function_name)()
     else:
         num_classes = len(torch.unique(y_train))
         model = nn.Sequential(
@@ -173,35 +61,111 @@ def optimize_model(task_type, X_train, y_train, X_test, y_test):
             nn.ReLU(),
             nn.Linear(hidden_size, num_classes)
         )
-        loss_fn = nn.CrossEntropyLoss()
+        loss_fn = getattr(nn, loss_function_name)()
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        model = model.to(device)
+        loss_fn = loss_fn.to(device)
+        X_train = X_train.to(device)
+        y_train = y_train.to(device)
+        X_test = X_test.to(device)
+        y_test = y_test.to(device)
+    else:
+        device = torch.device('cpu')
+
+    if optimizer_name == 'Adam':
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    elif optimizer_name == 'SGD':
+        optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+    elif optimizer_name == 'RMSprop':
+        optimizer = optim.RMSprop(model.parameters(), lr=learning_rate)
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)  # Default
 
     # DataLoader
     dataset = torch.utils.data.TensorDataset(X_train, y_train)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=int(batch_size), shuffle=True)
 
     # Training loop
     model.train()
-    for epoch in range(epochs):
+    for epoch in range(int(epochs)):
+        epoch_loss = 0.0
         for batch_X, batch_y in dataloader:
             optimizer.zero_grad()
             outputs = model(batch_X)
             loss = loss_fn(outputs, batch_y)
             loss.backward()
             optimizer.step()
+            epoch_loss += loss.item()
+        # Optionally, print epoch loss
+        # print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss/len(dataloader):.4f}")
 
-    return model, best_params
+    # Evaluation
+    model.eval()
+    with torch.no_grad():
+        outputs = model(X_test)
+        if task_type == 'Regression':
+            y_pred = outputs.cpu().numpy()
+            y_true = y_test.cpu().numpy()
 
-def classification_report_numpy(y_true, y_pred):
-    from sklearn.metrics import classification_report
-    report = classification_report(y_true, y_pred, output_dict=True)
-    return report
+            mse = np.mean((y_pred - y_true) ** 2)
+            rmse = np.sqrt(mse)
+            ss_total = np.sum((y_true - y_true.mean()) ** 2)
+            ss_res = np.sum((y_true - y_pred) ** 2)
+            r2 = 1 - (ss_res / ss_total)
 
-def confusion_matrix_numpy(y_true, y_pred):
-    from sklearn.metrics import confusion_matrix
-    matrix = confusion_matrix(y_true, y_pred)
-    return matrix
+            print(f"Task ID {task_id} - Regression Results:")
+            print(f"MSE: {mse:.4f}")
+            print(f"RMSE: {rmse:.4f}")
+            print(f"R2: {r2:.4f}")
+
+            # Prepare results
+            results = {
+                'Task ID': task_id,
+                'Hyperparameters': {
+                    'learning_rate': learning_rate,
+                    'batch_size': batch_size,
+                    'epochs': epochs,
+                    'hidden_size': hidden_size,
+                    'optimizer': optimizer_name,
+                    'loss_function': loss_function_name
+                },
+                'MSE': mse,
+                'RMSE': rmse,
+                'R2': r2
+            }
+
+        else:
+            y_pred = outputs.argmax(dim=1).cpu().numpy()
+            y_true = y_test.cpu().numpy()
+
+            accuracy = np.mean(y_pred == y_true)
+
+            print(f"Task ID {task_id} - Classification Results:")
+            print(f"Accuracy: {accuracy:.4f}")
+
+            # Prepare results
+            results = {
+                'Task ID': task_id,
+                'Hyperparameters': {
+                    'learning_rate': learning_rate,
+                    'batch_size': batch_size,
+                    'epochs': epochs,
+                    'hidden_size': hidden_size,
+                    'optimizer': optimizer_name,
+                    'loss_function': loss_function_name
+                },
+                'Accuracy': accuracy
+            }
+
+    # Save results specific to this task
+    results_dir = os.path.join(main_job_dir, 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    results_path = os.path.join(results_dir, f'result_{task_id}.pkl')
+    with open(results_path, 'wb') as f:
+        pickle.dump(results, f)
+    print(f"Results saved to '{results_path}'.")
 
 if __name__ == '__main__':
     main()

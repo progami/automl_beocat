@@ -1,5 +1,3 @@
-# automl.py
-
 import os
 import pandas as pd
 import numpy as np
@@ -9,10 +7,9 @@ import re
 import time
 import datetime
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import streamlit as st
-
+from itertools import product
 
 def main():
     st.title("AutoML on Beocat")
@@ -44,10 +41,70 @@ def main():
     st.header("Select Task Type")
     task_type = st.radio("Is this a regression or classification task?", ('Regression', 'Classification'))
 
-    # Since we're focusing on neural networks, we set algorithms to 'Neural Network'
-    algorithms = ['Neural Network']
-    st.info("Algorithm selected: Neural Network")
-    print("Algorithm selected: Neural Network")  # Console output
+    # Hyperparameter Settings
+    st.header("Hyperparameter Settings")
+
+    # Batch Size Options
+    st.markdown("**Batch Size**")
+    batch_size_options = [16, 32, 64, 128, 256]
+    batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options, default=[32, 64])
+
+    # Learning Rate Options
+    st.markdown("**Learning Rate**")
+    learning_rate_options = [0.0001, 0.001, 0.01, 0.1]
+    learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options, default=[0.001, 0.01])
+
+    # Epochs Options
+    st.markdown("**Epochs**")
+    epochs_options = [50, 100, 150, 200]
+    epochs_list = st.multiselect("Select Number of Epochs:", epochs_options, default=[100])
+
+    # Hidden Layer Size Options
+    st.markdown("**Hidden Layer Size**")
+    hidden_size_options = [32, 64, 128, 256]
+    hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options, default=[64, 128])
+
+    # Optimizer Options
+    st.markdown("**Optimizers**")
+    optimizer_options = ['Adam', 'SGD', 'RMSprop']
+    optimizers = st.multiselect("Select Optimizers:", optimizer_options, default=['Adam'])
+
+    # Loss Function Options
+    st.markdown("**Loss Functions**")
+    if task_type == 'Regression':
+        loss_function_options = ['MSELoss', 'L1Loss', 'SmoothL1Loss']
+    else:
+        loss_function_options = ['CrossEntropyLoss', 'NLLLoss']
+    loss_functions = st.multiselect("Select Loss Functions:", loss_function_options, default=[loss_function_options[0]])
+
+    # Hyperparameters dictionary
+    hyperparams = {
+        'learning_rates': learning_rates,
+        'batch_sizes': batch_sizes,
+        'epochs_list': epochs_list,
+        'hidden_sizes': hidden_sizes,
+        'optimizers': optimizers,
+        'loss_functions': loss_functions
+    }
+
+    # Generate hyperparameter combinations
+    combinations = generate_hyperparameter_combinations(hyperparams)
+    num_combinations = len(combinations)
+    st.write(f"Total hyperparameter combinations: {num_combinations}")
+
+    # Display combinations
+    if num_combinations <= 100:
+        combination_df = pd.DataFrame(combinations, columns=[
+            'Learning Rate',
+            'Batch Size',
+            'Epochs',
+            'Hidden Size',
+            'Optimizer',
+            'Loss Function'
+        ])
+        st.dataframe(combination_df)
+    else:
+        st.warning("Too many combinations to display.")
 
     # Partition selection
     st.header("SLURM Partition Selection")
@@ -59,13 +116,40 @@ def main():
     # Resource specifications
     st.header("Resource Specifications")
     time_limit = st.text_input("Enter time limit (e.g., 01:00:00 for 1 hour):", value="01:00:00")
-    memory_per_cpu = st.text_input("Enter memory per CPU (e.g., 4G for 4 GB):", value="4G")
+    memory_per_cpu = st.number_input("Enter memory per CPU in GB:", min_value=1, max_value=512, value=4)
     cpus_per_task = st.number_input("Enter number of CPUs per task:", min_value=1, max_value=32, value=1)
+
+    # GPU Resources
+    st.header("GPU Resources")
+    use_gpu = st.checkbox("Use GPU for Training")
+    if use_gpu:
+        gpus = st.number_input("Enter number of GPUs to use:", min_value=1, max_value=8, value=1)
+        # List of available GPU types
+        gpu_types = [
+            'geforce_gtx_1080_ti',
+            'geforce_rtx_2080_ti',
+            'geforce_rtx_3090',
+            'l40s',
+            'quadro_gp100',
+            'rtx_a4000',
+            'rtx_a4500',
+            'rtx_a6000'
+        ]
+        gpu_type = st.selectbox("Select GPU Type:", gpu_types)
+    else:
+        gpus = 0
+        gpu_type = None
+
+    # Limit concurrent jobs
+    max_concurrent_jobs = st.number_input("Max Concurrent Jobs (to avoid overloading the system):", min_value=1, max_value=100, value=10)
 
     # Start training button
     if st.button("Start Training"):
-        st.info("Preparing data and submitting job(s) to SLURM...")
-        print("Preparing data and submitting job(s) to SLURM...")  # Console output
+        if num_combinations > 500:
+            st.error("Too many hyperparameter combinations selected. Please reduce the number to less than 500.")
+            return
+        st.info("Preparing data and submitting jobs to SLURM...")
+        print("Preparing data and submitting jobs to SLURM...")  # Console output
 
         # Create a unique main job directory
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -129,80 +213,97 @@ def main():
             pickle.dump((X_train, y_train, X_test, y_test), f)
         with open(os.path.join(main_job_dir, 'params.pkl'), 'wb') as f:
             pickle.dump({'task_type': task_type}, f)
-        print("Data and task_type saved.")  # Console output
+        with open(os.path.join(main_job_dir, 'combinations.pkl'), 'wb') as f:
+            pickle.dump(combinations, f)
+        print("Data, task_type, and hyperparameter combinations saved.")  # Console output
 
-        # Since we're only using Neural Network, we can proceed directly
-        algorithm = 'Neural Network'
-        st.info(f"Submitting job for algorithm: {algorithm}")
-        print(f"Submitting job for algorithm: {algorithm}")
-
-        # Create a directory for this algorithm's job inside the main job directory
-        algorithm_safe = algorithm.replace(' ', '_').lower()
-        job_dir = os.path.join(main_job_dir, algorithm_safe)
+        # Generate SLURM script for the job array
+        job_dir = os.path.join(main_job_dir, 'jobs')
         os.makedirs(job_dir, exist_ok=True)
-
-        # Generate SLURM script for this algorithm
         slurm_script_content = generate_slurm_script(
-            job_name=f'automl_job_{algorithm_safe}_{timestamp}',
-            script_path=os.path.abspath('training.py'),  # Use absolute path
-            output_path=os.path.join(job_dir, 'slurm_output.txt'),
-            error_path=os.path.join(job_dir, 'slurm_error.txt'),
+            job_name=f'automl_array_job_{timestamp}',
+            script_path=os.path.abspath('training.py'),
+            output_path=os.path.join(job_dir, 'slurm_output_%A_%a.txt'),
+            error_path=os.path.join(job_dir, 'slurm_error_%A_%a.txt'),
             partition=selected_partition,
             time=time_limit,
-            mem_per_cpu=memory_per_cpu,
+            mem_per_cpu=f"{memory_per_cpu}G",
             cpus_per_task=cpus_per_task,
             job_dir=os.path.abspath(job_dir),
-            algorithm=algorithm,
-            main_job_dir=os.path.abspath(main_job_dir)
+            main_job_dir=os.path.abspath(main_job_dir),
+            gpus=gpus,
+            gpu_type=gpu_type,
+            array=f"0-{num_combinations-1}%{max_concurrent_jobs}",
+            num_combinations=num_combinations
         )
 
         # Save the SLURM script to the job directory
         slurm_script_path = os.path.join(job_dir, 'job.slurm')
         with open(slurm_script_path, 'w') as f:
             f.write(slurm_script_content)
-        print(f"SLURM script for {algorithm} saved as '{slurm_script_path}'.")
+        print(f"SLURM script saved as '{slurm_script_path}'.")
 
-        # Submit the job
+        # Submit the job array
         submit_command = ['sbatch', slurm_script_path]
         result = subprocess.run(submit_command, capture_output=True, text=True)
         st.text(result.stdout)
         print(result.stdout)
         if result.returncode != 0:
-            st.error(f"Job submission failed for {algorithm}: {result.stderr}")
-            print(f"Job submission failed for {algorithm}: {result.stderr}")
+            st.error(f"Job submission failed: {result.stderr}")
+            print(f"Job submission failed: {result.stderr}")
         else:
             # Extract job ID from output
             job_id = parse_job_id(result.stdout)
             if job_id:
-                st.success(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
-                print(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
-                job_info = (job_id, algorithm, job_dir)
-
-                # Monitor the submitted job
-                st.info(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
-                print(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
+                st.success(f"Job array submitted successfully. Job ID: {job_id}")
+                print(f"Job array submitted successfully. Job ID: {job_id}")
+                st.info(f"Monitoring job status (Job ID: {job_id})...")
+                print(f"Monitoring job status (Job ID: {job_id})...")
                 job_complete = monitor_job(job_id)
                 if job_complete:
-                    st.success(f"Job completed successfully for {algorithm}.")
-                    print(f"Job completed successfully for {algorithm}.")
+                    st.success("All jobs completed successfully.")
+                    print("All jobs completed successfully.")
                     # Load and display results
-                    results_path = os.path.join(job_dir, 'results.pkl')
-                    if os.path.exists(results_path):
-                        with open(results_path, 'rb') as f:
-                            results = pickle.load(f)
-                        display_results([results], task_type)
+                    results_dir = os.path.join(main_job_dir, 'results')
+                    results = collect_results(results_dir, task_type)
+                    if results:
+                        display_leaderboard(results, task_type)
                     else:
-                        st.error(f"Results file not found for {algorithm}.")
-                        print(f"Error: Results file not found for {algorithm}.")
+                        st.error("No results found.")
+                        print("Error: No results found.")
                 else:
-                    st.error(f"Job did not complete successfully for {algorithm}.")
-                    print(f"Error: Job did not complete successfully for {algorithm}.")
+                    st.error("Jobs did not complete successfully.")
+                    print("Error: Jobs did not complete successfully.")
             else:
-                st.error(f"Could not parse job ID for {algorithm} from submission output.")
-                print(f"Error: Could not parse job ID for {algorithm} from submission output.")
+                st.error("Could not parse job ID from submission output.")
+                print("Error: Could not parse job ID from submission output.")
 
+def generate_hyperparameter_combinations(hyperparams):
+    combinations = list(product(
+        hyperparams['learning_rates'],
+        hyperparams['batch_sizes'],
+        hyperparams['epochs_list'],
+        hyperparams['hidden_sizes'],
+        hyperparams['optimizers'],
+        hyperparams['loss_functions']
+    ))
+    return combinations
 
-def generate_slurm_script(job_name, script_path, output_path, error_path, partition='batch.q', time='01:00:00', mem_per_cpu='4G', cpus_per_task=1, job_dir='', algorithm='', main_job_dir=''):
+def generate_slurm_script(job_name, script_path, output_path, error_path, partition='batch.q', time='01:00:00', mem_per_cpu='4G', cpus_per_task=1, job_dir='', main_job_dir='', gpus=0, gpu_type=None, array=None, num_combinations=1):
+    # GPU request line
+    gpu_request = ''
+    if gpus > 0:
+        if gpu_type:
+            gpu_request = f"#SBATCH --gres=gpu:{gpu_type}:{gpus}"
+        else:
+            gpu_request = f"#SBATCH --gres=gpu:{gpus}"
+
+    # Job array line
+    if array:
+        array_line = f"#SBATCH --array={array}"
+    else:
+        array_line = ""
+
     slurm_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --output={output_path}
@@ -213,16 +314,17 @@ def generate_slurm_script(job_name, script_path, output_path, error_path, partit
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task={cpus_per_task}
 #SBATCH --mem-per-cpu={mem_per_cpu}
+{gpu_request}
+{array_line}
 
 module load Python/3.10.4-GCCcore-11.3.0  # Adjust based on available modules
 source ~/virtualenvs/automl_env/bin/activate
 
 cd {job_dir}
 
-python {script_path} --job_dir {job_dir} --algorithm "{algorithm}" --main_job_dir {main_job_dir}
+python {script_path} --task_id $SLURM_ARRAY_TASK_ID --total_tasks {num_combinations} --main_job_dir {main_job_dir}
 """
     return slurm_script
-
 
 def parse_job_id(submission_output):
     # Example output: "Submitted batch job 123456"
@@ -231,7 +333,6 @@ def parse_job_id(submission_output):
         return match.group(1)
     else:
         return None
-
 
 def monitor_job(job_id):
     import subprocess
@@ -245,37 +346,50 @@ def monitor_job(job_id):
             time.sleep(30)  # Wait before checking again
         else:
             job_running = False
-    # Optionally, check slurm_output.txt or slurm_error.txt for details
     return True
 
+def collect_results(results_dir, task_type):
+    results = []
+    if os.path.exists(results_dir):
+        for file_name in os.listdir(results_dir):
+            if file_name.endswith('.pkl'):
+                with open(os.path.join(results_dir, file_name), 'rb') as f:
+                    result = pickle.load(f)
+                    results.append(result)
+        return results
+    else:
+        return None
 
-def display_results(results, task_type):
+def display_leaderboard(results, task_type):
+    st.header("Leaderboard")
+    print("Generating leaderboard...")
+    # Prepare DataFrame
+    leaderboard_data = []
     for result in results:
-        st.write(f"### Algorithm: {result['Algorithm']}")
-        print(f"Algorithm: {result['Algorithm']}")  # Console output
+        entry = {
+            'Task ID': result['Task ID'],
+            'Learning Rate': result['Hyperparameters']['learning_rate'],
+            'Batch Size': result['Hyperparameters']['batch_size'],
+            'Epochs': result['Hyperparameters']['epochs'],
+            'Hidden Size': result['Hyperparameters']['hidden_size'],
+            'Optimizer': result['Hyperparameters']['optimizer'],
+            'Loss Function': result['Hyperparameters']['loss_function'],
+        }
         if task_type == 'Regression':
-            st.write(f"**Mean Squared Error (MSE)**: {result['MSE']:.4f}")
-            st.write(f"**Root Mean Squared Error (RMSE)**: {result['RMSE']:.4f}")
-            st.write(f"**R-squared (R²)**: {result['R2']:.4f}")
-            print(f"Mean Squared Error (MSE): {result['MSE']:.4f}")  # Console output
-            print(f"Root Mean Squared Error (RMSE): {result['RMSE']:.4f}")  # Console output
-            print(f"R-squared (R²): {result['R2']:.4f}")  # Console output
+            entry['MSE'] = result['MSE']
+            entry['RMSE'] = result['RMSE']
+            entry['R2'] = result['R2']
         else:
-            st.write(f"**Accuracy**: {result['Accuracy']:.4f}")
-            st.write("**Classification Report:**")
-            st.dataframe(pd.DataFrame(result['Classification Report']).transpose())
-            st.write("**Confusion Matrix:**")
-            st.write(result['Confusion Matrix'])
-            print(f"Accuracy: {result['Accuracy']:.4f}")  # Console output
-            print("Classification Report:")  # Console output
-            print(pd.DataFrame(result['Classification Report']).transpose())  # Console output
-            print("Confusion Matrix:")  # Console output
-            print(result['Confusion Matrix'])  # Console output
-        st.write("**Best Hyperparameters:**")
-        st.write(result['Best Params'])
-        print("Best Hyperparameters:")  # Console output
-        print(result['Best Params'])  # Console output
+            entry['Accuracy'] = result['Accuracy']
+        leaderboard_data.append(entry)
 
+    leaderboard_df = pd.DataFrame(leaderboard_data)
+    if task_type == 'Regression':
+        leaderboard_df = leaderboard_df.sort_values(by='MSE')
+    else:
+        leaderboard_df = leaderboard_df.sort_values(by='Accuracy', ascending=False)
+    st.dataframe(leaderboard_df)
+    print("Leaderboard displayed.")
 
 if __name__ == '__main__':
     main()
