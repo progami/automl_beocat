@@ -10,6 +10,8 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 import streamlit as st
 from itertools import product
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def main():
     st.title("AutoML on Beocat")
@@ -264,8 +266,7 @@ def main():
                     st.success("All jobs completed successfully.")
                     print("All jobs completed successfully.")
                     # Load and display results
-                    results_dir = os.path.join(main_job_dir, 'results')
-                    results = collect_results(results_dir, task_type)
+                    results = collect_results(main_job_dir, task_type)
                     if results:
                         display_leaderboard(results, task_type)
                     else:
@@ -348,17 +349,28 @@ def monitor_job(job_id):
             job_running = False
     return True
 
-def collect_results(results_dir, task_type):
+def collect_results(main_job_dir, task_type):
     results = []
+    results_dir = os.path.join(main_job_dir, 'results')
     if os.path.exists(results_dir):
         for file_name in os.listdir(results_dir):
             if file_name.endswith('.pkl'):
                 with open(os.path.join(results_dir, file_name), 'rb') as f:
                     result = pickle.load(f)
                     results.append(result)
-        return results
     else:
-        return None
+        # Check for chunked results
+        for chunk_dir_name in os.listdir(main_job_dir):
+            if chunk_dir_name.startswith('chunk_'):
+                chunk_dir = os.path.join(main_job_dir, chunk_dir_name)
+                results_dir = os.path.join(chunk_dir, 'results')
+                if os.path.exists(results_dir):
+                    for file_name in os.listdir(results_dir):
+                        if file_name.endswith('.pkl'):
+                            with open(os.path.join(results_dir, file_name), 'rb') as f:
+                                result = pickle.load(f)
+                                results.append(result)
+    return results if results else None
 
 def display_leaderboard(results, task_type):
     st.header("Leaderboard")
@@ -390,6 +402,46 @@ def display_leaderboard(results, task_type):
         leaderboard_df = leaderboard_df.sort_values(by='Accuracy', ascending=False)
     st.dataframe(leaderboard_df)
     print("Leaderboard displayed.")
+
+    # Visualization Section
+    st.header("Performance Visualization")
+    st.write("Select hyperparameters and metrics to visualize their relationships.")
+
+    # List of hyperparameters and metrics
+    hyperparameters = ['Learning Rate', 'Batch Size', 'Epochs', 'Hidden Size', 'Optimizer', 'Loss Function']
+    if task_type == 'Regression':
+        metrics = ['MSE', 'RMSE', 'R2']
+    else:
+        metrics = ['Accuracy']
+
+    x_axis = st.selectbox("Select X-axis (Hyperparameter):", hyperparameters)
+    y_axis = st.selectbox("Select Y-axis (Metric):", metrics)
+    hue_option = st.selectbox("Select Hue (Optional):", [None] + hyperparameters)
+
+    # Convert categorical variables to strings
+    for col in ['Optimizer', 'Loss Function']:
+        leaderboard_df[col] = leaderboard_df[col].astype(str)
+
+    plt.figure(figsize=(10, 6))
+
+    if leaderboard_df[x_axis].dtype == 'object' or leaderboard_df[x_axis].dtype == 'str':
+        # Categorical x-axis
+        sns.boxplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis])
+    else:
+        # Numerical x-axis
+        if hue_option and hue_option != 'None':
+            if leaderboard_df[hue_option].dtype == 'object' or leaderboard_df[hue_option].dtype == 'str':
+                sns.scatterplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis], hue=leaderboard_df[hue_option])
+            else:
+                sns.scatterplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis], hue=leaderboard_df[hue_option].astype(str))
+        else:
+            sns.scatterplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis])
+        sns.lineplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis], estimator='mean', ci=None)
+    plt.title(f"{y_axis} vs {x_axis}")
+    plt.xlabel(x_axis)
+    plt.ylabel(y_axis)
+    st.pyplot(plt)
+    print("Visualization displayed.")
 
 if __name__ == '__main__':
     main()
