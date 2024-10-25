@@ -44,17 +44,10 @@ def main():
     st.header("Select Task Type")
     task_type = st.radio("Is this a regression or classification task?", ('Regression', 'Classification'))
 
-    # Select algorithms
-    st.header("Select Algorithms")
-    if task_type == 'Regression':
-        algorithms = st.multiselect("Select algorithms to train:", ['Linear Regression', 'Random Forest Regressor', 'Neural Network'], default=['Linear Regression'])
-    else:
-        algorithms = st.multiselect("Select algorithms to train:", ['Logistic Regression', 'Random Forest Classifier', 'Neural Network'], default=['Logistic Regression'])
-
-    if not algorithms:
-        st.warning("Please select at least one algorithm.")
-        print("No algorithms selected.")  # Console output
-        return
+    # Since we're focusing on neural networks, we set algorithms to 'Neural Network'
+    algorithms = ['Neural Network']
+    st.info("Algorithm selected: Neural Network")
+    print("Algorithm selected: Neural Network")  # Console output
 
     # Partition selection
     st.header("SLURM Partition Selection")
@@ -138,77 +131,76 @@ def main():
             pickle.dump({'task_type': task_type}, f)
         print("Data and task_type saved.")  # Console output
 
-        # Iterate over selected algorithms and submit a job for each
-        job_ids = []
-        for algorithm in algorithms:
-            st.info(f"Submitting job for algorithm: {algorithm}")
-            print(f"Submitting job for algorithm: {algorithm}")
+        # Since we're only using Neural Network, we can proceed directly
+        algorithm = 'Neural Network'
+        st.info(f"Submitting job for algorithm: {algorithm}")
+        print(f"Submitting job for algorithm: {algorithm}")
 
-            # Create a directory for this algorithm's job inside the main job directory
-            algorithm_safe = algorithm.replace(' ', '_').lower()
-            job_dir = os.path.join(main_job_dir, algorithm_safe)
-            os.makedirs(job_dir, exist_ok=True)
+        # Create a directory for this algorithm's job inside the main job directory
+        algorithm_safe = algorithm.replace(' ', '_').lower()
+        job_dir = os.path.join(main_job_dir, algorithm_safe)
+        os.makedirs(job_dir, exist_ok=True)
 
-            # Generate SLURM script for this algorithm
-            slurm_script_content = generate_slurm_script(
-                job_name=f'automl_job_{algorithm_safe}_{timestamp}',
-                script_path=os.path.abspath('training.py'),  # Use absolute path
-                output_path=os.path.join(job_dir, 'slurm_output.txt'),
-                error_path=os.path.join(job_dir, 'slurm_error.txt'),
-                partition=selected_partition,
-                time=time_limit,
-                mem_per_cpu=memory_per_cpu,
-                cpus_per_task=cpus_per_task,
-                job_dir=os.path.abspath(job_dir),
-                algorithm=algorithm,
-                main_job_dir=os.path.abspath(main_job_dir)
-            )
+        # Generate SLURM script for this algorithm
+        slurm_script_content = generate_slurm_script(
+            job_name=f'automl_job_{algorithm_safe}_{timestamp}',
+            script_path=os.path.abspath('training.py'),  # Use absolute path
+            output_path=os.path.join(job_dir, 'slurm_output.txt'),
+            error_path=os.path.join(job_dir, 'slurm_error.txt'),
+            partition=selected_partition,
+            time=time_limit,
+            mem_per_cpu=memory_per_cpu,
+            cpus_per_task=cpus_per_task,
+            job_dir=os.path.abspath(job_dir),
+            algorithm=algorithm,
+            main_job_dir=os.path.abspath(main_job_dir)
+        )
 
-            # Save the SLURM script to the job directory
-            slurm_script_path = os.path.join(job_dir, 'job.slurm')
-            with open(slurm_script_path, 'w') as f:
-                f.write(slurm_script_content)
-            print(f"SLURM script for {algorithm} saved as '{slurm_script_path}'.")
+        # Save the SLURM script to the job directory
+        slurm_script_path = os.path.join(job_dir, 'job.slurm')
+        with open(slurm_script_path, 'w') as f:
+            f.write(slurm_script_content)
+        print(f"SLURM script for {algorithm} saved as '{slurm_script_path}'.")
 
-            # Submit the job
-            submit_command = ['sbatch', slurm_script_path]
-            result = subprocess.run(submit_command, capture_output=True, text=True)
-            st.text(result.stdout)
-            print(result.stdout)
-            if result.returncode != 0:
-                st.error(f"Job submission failed for {algorithm}: {result.stderr}")
-                print(f"Job submission failed for {algorithm}: {result.stderr}")
-            else:
-                # Extract job ID from output
-                job_id = parse_job_id(result.stdout)
-                if job_id:
-                    st.success(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
-                    print(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
-                    job_ids.append((job_id, algorithm, job_dir))
+        # Submit the job
+        submit_command = ['sbatch', slurm_script_path]
+        result = subprocess.run(submit_command, capture_output=True, text=True)
+        st.text(result.stdout)
+        print(result.stdout)
+        if result.returncode != 0:
+            st.error(f"Job submission failed for {algorithm}: {result.stderr}")
+            print(f"Job submission failed for {algorithm}: {result.stderr}")
+        else:
+            # Extract job ID from output
+            job_id = parse_job_id(result.stdout)
+            if job_id:
+                st.success(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
+                print(f"Job submitted successfully for {algorithm}. Job ID: {job_id}")
+                job_info = (job_id, algorithm, job_dir)
+
+                # Monitor the submitted job
+                st.info(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
+                print(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
+                job_complete = monitor_job(job_id)
+                if job_complete:
+                    st.success(f"Job completed successfully for {algorithm}.")
+                    print(f"Job completed successfully for {algorithm}.")
+                    # Load and display results
+                    results_path = os.path.join(job_dir, 'results.pkl')
+                    if os.path.exists(results_path):
+                        with open(results_path, 'rb') as f:
+                            results = pickle.load(f)
+                        display_results([results], task_type)
+                    else:
+                        st.error(f"Results file not found for {algorithm}.")
+                        print(f"Error: Results file not found for {algorithm}.")
                 else:
-                    st.error(f"Could not parse job ID for {algorithm} from submission output.")
-                    print(f"Error: Could not parse job ID for {algorithm} from submission output.")
-
-        # Monitor all submitted jobs
-        for job_id, algorithm, job_dir in job_ids:
-            st.info(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
-            print(f"Monitoring job status for {algorithm} (Job ID: {job_id})...")
-            job_complete = monitor_job(job_id)
-            if job_complete:
-                st.success(f"Job completed successfully for {algorithm}.")
-                print(f"Job completed successfully for {algorithm}.")
-                # Load and display results
-                results_path = os.path.join(job_dir, 'results.pkl')
-                if os.path.exists(results_path):
-                    with open(results_path, 'rb') as f:
-                        results = pickle.load(f)
-                    display_results([results], task_type)
-                else:
-                    st.error(f"Results file not found for {algorithm}.")
-                    print(f"Error: Results file not found for {algorithm}.")
+                    st.error(f"Job did not complete successfully for {algorithm}.")
+                    print(f"Error: Job did not complete successfully for {algorithm}.")
             else:
-                st.error(f"Job did not complete successfully for {algorithm}.")
-                print(f"Error: Job did not complete successfully for {algorithm}.")
+                st.error(f"Could not parse job ID for {algorithm} from submission output.")
+                print(f"Error: Could not parse job ID for {algorithm} from submission output.")
+
 
 def generate_slurm_script(job_name, script_path, output_path, error_path, partition='batch.q', time='01:00:00', mem_per_cpu='4G', cpus_per_task=1, job_dir='', algorithm='', main_job_dir=''):
     slurm_script = f"""#!/bin/bash
@@ -231,6 +223,7 @@ python {script_path} --job_dir {job_dir} --algorithm "{algorithm}" --main_job_di
 """
     return slurm_script
 
+
 def parse_job_id(submission_output):
     # Example output: "Submitted batch job 123456"
     match = re.search(r'Submitted batch job (\d+)', submission_output)
@@ -238,6 +231,7 @@ def parse_job_id(submission_output):
         return match.group(1)
     else:
         return None
+
 
 def monitor_job(job_id):
     import subprocess
@@ -253,6 +247,7 @@ def monitor_job(job_id):
             job_running = False
     # Optionally, check slurm_output.txt or slurm_error.txt for details
     return True
+
 
 def display_results(results, task_type):
     for result in results:
@@ -280,6 +275,7 @@ def display_results(results, task_type):
         st.write(result['Best Params'])
         print("Best Hyperparameters:")  # Console output
         print(result['Best Params'])  # Console output
+
 
 if __name__ == '__main__':
     main()
