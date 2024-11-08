@@ -10,74 +10,105 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 import streamlit as st
 from itertools import product
-import seaborn as sns
-import matplotlib.pyplot as plt
+import plotly.express as px
 
 def main():
+    st.set_page_config(layout="wide")
     st.title("AutoML on Beocat")
+    total_resources_placeholder = st.empty()  # Placeholder for total resources
     print("Starting AutoML on Beocat application...")  # Console output
 
-    # Allow user to upload a dataset
-    st.header("Dataset Selection")
+    # Custom CSS for the sticky info box in the upper right corner
+    st.markdown(
+        """
+        <style>
+        .total-resources {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            width: 300px;
+            background-color: #f0f2f6;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Function to display total resources in the custom div
+    def display_total_resources(info_text):
+        total_resources_placeholder.markdown(
+            f"""
+            <div class="total-resources">
+            {info_text}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Dataset and Task Selection
+    st.header("Dataset and Task Selection")
+
     uploaded_file = st.file_uploader("Upload a CSV file", type=['csv'])
     if uploaded_file is not None:
         # User uploaded a file
         data = pd.read_csv(uploaded_file)
         st.success("Dataset uploaded successfully.")
         print("Dataset uploaded successfully.")  # Console output
+
+        columns = data.columns.tolist()
+        if not columns:
+            st.error("The uploaded dataset does not contain any columns.")
+            print("Error: The uploaded dataset does not contain any columns.")  # Console output
+            return
+
+        col1, col2 = st.columns(2)
+        with col1:
+            target_column = st.selectbox("Select the target (label) column:", columns)
+        with col2:
+            task_type = st.radio("Task Type:", ('Regression', 'Classification'))
     else:
         st.warning("Please upload a dataset to proceed.")
         print("Awaiting dataset upload...")  # Console output
         return
 
-    # Display columns and let user select target column
-    st.header("Select Target Column")
-    columns = data.columns.tolist()
-    if not columns:
-        st.error("The uploaded dataset does not contain any columns.")
-        print("Error: The uploaded dataset does not contain any columns.")  # Console output
-        return
-    target_column = st.selectbox("Select the target (label) column:", columns)
-
-    # Select task type
-    st.header("Select Task Type")
-    task_type = st.radio("Is this a regression or classification task?", ('Regression', 'Classification'))
-
     # Hyperparameter Settings
     st.header("Hyperparameter Settings")
 
-    # Batch Size Options
-    st.markdown("**Batch Size**")
-    batch_size_options = [16, 32, 64, 128, 256]
-    batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options, default=[32, 64])
+    col1, col2, col3 = st.columns(3)
 
-    # Learning Rate Options
-    st.markdown("**Learning Rate**")
-    learning_rate_options = [0.0001, 0.001, 0.01, 0.1]
-    learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options, default=[0.001, 0.01])
+    with col1:
+        st.markdown("**Batch Size**")
+        batch_size_options = [16, 32, 64, 128, 256]
+        batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options, default=[32, 64])
 
-    # Epochs Options
-    st.markdown("**Epochs**")
-    epochs_options = [50, 100, 150, 200]
-    epochs_list = st.multiselect("Select Number of Epochs:", epochs_options, default=[100])
+        st.markdown("**Learning Rate**")
+        learning_rate_options = [0.0001, 0.001, 0.01, 0.1]
+        learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options, default=[0.001, 0.01])
 
-    # Hidden Layer Size Options
-    st.markdown("**Hidden Layer Size**")
-    hidden_size_options = [32, 64, 128, 256]
-    hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options, default=[64, 128])
+    with col2:
+        st.markdown("**Epochs**")
+        epochs_options = [50, 100, 150, 200]
+        epochs_list = st.multiselect("Select Number of Epochs:", epochs_options, default=[100])
 
-    # Optimizer Options
-    st.markdown("**Optimizers**")
-    optimizer_options = ['Adam', 'SGD', 'RMSprop']
-    optimizers = st.multiselect("Select Optimizers:", optimizer_options, default=['Adam'])
+        st.markdown("**Hidden Layer Size**")
+        hidden_size_options = [32, 64, 128, 256]
+        hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options, default=[64, 128])
 
-    # Loss Function Options
-    st.markdown("**Loss Functions**")
-    if task_type == 'Regression':
-        loss_function_options = ['MSELoss', 'L1Loss', 'SmoothL1Loss']
-    else:
-        loss_function_options = ['CrossEntropyLoss', 'NLLLoss']
-    loss_functions = st.multiselect("Select Loss Functions:", loss_function_options, default=[loss_function_options[0]])
+    with col3:
+        st.markdown("**Optimizers**")
+        optimizer_options = ['Adam', 'SGD', 'RMSprop']
+        optimizers = st.multiselect("Select Optimizers:", optimizer_options, default=['Adam'])
+
+        st.markdown("**Loss Functions**")
+        if task_type == 'Regression':
+            loss_function_options = ['MSELoss', 'L1Loss', 'SmoothL1Loss']
+        else:
+            loss_function_options = ['CrossEntropyLoss', 'NLLLoss']
+        loss_functions = st.multiselect("Select Loss Functions:", loss_function_options, default=[loss_function_options[0]])
 
     # Hyperparameters dictionary
     hyperparams = {
@@ -108,42 +139,99 @@ def main():
     else:
         st.warning("Too many combinations to display.")
 
-    # Partition selection
-    st.header("SLURM Partition Selection")
-    partitions = ['batch.q', 'killable.q', 'interact.q', 'vis.q']
-    selected_partition = st.selectbox("Select a partition for your job:", partitions, index=0)
-    st.info(f"Selected partition: {selected_partition}")
-    print(f"Selected partition: {selected_partition}")  # Console output
-
-    # Resource specifications
+    # Resource Specifications
     st.header("Resource Specifications")
-    time_limit = st.text_input("Enter time limit (e.g., 01:00:00 for 1 hour):", value="01:00:00")
-    memory_per_cpu = st.number_input("Enter memory per CPU in GB:", min_value=1, max_value=512, value=4)
-    cpus_per_task = st.number_input("Enter number of CPUs per task:", min_value=1, max_value=32, value=1)
 
-    # GPU Resources
-    st.header("GPU Resources")
-    use_gpu = st.checkbox("Use GPU for Training")
-    if use_gpu:
-        gpus = st.number_input("Enter number of GPUs to use:", min_value=1, max_value=8, value=1)
-        # List of available GPU types
-        gpu_types = [
-            'geforce_gtx_1080_ti',
-            'geforce_rtx_2080_ti',
-            'geforce_rtx_3090',
-            'l40s',
-            'quadro_gp100',
-            'rtx_a4000',
-            'rtx_a4500',
-            'rtx_a6000'
-        ]
-        gpu_type = st.selectbox("Select GPU Type:", gpu_types)
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        time_limit_hours = st.number_input(
+            "Time Limit (Hours):",
+            min_value=1,
+            max_value=168,  # Maximum 7 days
+            value=1
+        )
+
+    with col2:
+        memory_per_cpu = st.number_input(
+            "Memory per CPU (GB):",
+            min_value=1,
+            max_value=512,
+            value=4
+        )
+
+    with col3:
+        cpus_per_task = st.number_input(
+            "CPUs per Task:",
+            min_value=1,
+            max_value=32,
+            value=1
+        )
+
+    col4, col5 = st.columns(2)
+
+    with col4:
+        max_concurrent_jobs = st.number_input(
+            "Max Concurrent Jobs:",
+            min_value=1,
+            max_value=100,
+            value=10
+        )
+
+    with col5:
+        use_gpu = st.checkbox("Use GPU for Training")
+        if use_gpu:
+            gpus = st.number_input("Number of GPUs:", min_value=1, max_value=8, value=1)
+            # List of available GPU types
+            gpu_types = [
+                'geforce_gtx_1080_ti',
+                'geforce_rtx_2080_ti',
+                'geforce_rtx_3090',
+                'l40s',
+                'quadro_gp100',
+                'rtx_a4000',
+                'rtx_a4500',
+                'rtx_a6000'
+            ]
+            gpu_type = st.selectbox("GPU Type:", gpu_types)
+        else:
+            gpus = 0
+            gpu_type = None
+
+    # Calculate total resources
+    # First, ensure all necessary inputs are available
+    if time_limit_hours and memory_per_cpu and cpus_per_task and num_combinations:
+        # Calculate total CPUs
+        total_cpus = num_combinations * cpus_per_task
+
+        # Total time in hours
+        total_time_hours = time_limit_hours
+
+        # Calculate total CPU hours
+        total_cpu_hours = total_cpus * total_time_hours
+
+        # Calculate total memory
+        total_memory_gb = num_combinations * cpus_per_task * memory_per_cpu
+
+        # Calculate total GPUs
+        if use_gpu:
+            total_gpus = num_combinations * gpus
+        else:
+            total_gpus = 0
+
+        # Update the placeholder at the top
+        info_text = f"""
+        **Total Resources Requested:**
+
+        - Total Jobs: {num_combinations}
+        - Total CPUs: {total_cpus}
+        - Total CPU Hours: {total_cpu_hours:.2f} hours
+        - Total Memory: {total_memory_gb} GB
+        - Total GPUs: {total_gpus}
+        """
+        display_total_resources(info_text)
     else:
-        gpus = 0
-        gpu_type = None
-
-    # Limit concurrent jobs
-    max_concurrent_jobs = st.number_input("Max Concurrent Jobs (to avoid overloading the system):", min_value=1, max_value=100, value=10)
+        display_total_resources("Please complete all inputs to calculate total resources.")
 
     # Start training button
     if st.button("Start Training"):
@@ -227,8 +315,7 @@ def main():
             script_path=os.path.abspath('training.py'),
             output_path=os.path.join(job_dir, 'slurm_output_%A_%a.txt'),
             error_path=os.path.join(job_dir, 'slurm_error_%A_%a.txt'),
-            partition=selected_partition,
-            time=time_limit,
+            time_hours=time_limit_hours,
             mem_per_cpu=f"{memory_per_cpu}G",
             cpus_per_task=cpus_per_task,
             job_dir=os.path.abspath(job_dir),
@@ -265,10 +352,14 @@ def main():
                 if job_complete:
                     st.success("All jobs completed successfully.")
                     print("All jobs completed successfully.")
-                    # Load and display results
+                    # Load and store results
                     results = collect_results(main_job_dir, task_type)
                     if results:
-                        display_leaderboard(results, task_type)
+                        # Store results in session state
+                        st.session_state['results'] = results
+                        st.session_state['task_type'] = task_type
+                        # Do not call display_leaderboard here
+                        # It will be called at the end of main()
                     else:
                         st.error("No results found.")
                         print("Error: No results found.")
@@ -278,6 +369,10 @@ def main():
             else:
                 st.error("Could not parse job ID from submission output.")
                 print("Error: Could not parse job ID from submission output.")
+
+    # Check if results are available in session state for visualization
+    if 'results' in st.session_state and 'task_type' in st.session_state:
+        display_leaderboard(st.session_state['results'], st.session_state['task_type'])
 
 def generate_hyperparameter_combinations(hyperparams):
     combinations = list(product(
@@ -290,7 +385,10 @@ def generate_hyperparameter_combinations(hyperparams):
     ))
     return combinations
 
-def generate_slurm_script(job_name, script_path, output_path, error_path, partition='batch.q', time='01:00:00', mem_per_cpu='4G', cpus_per_task=1, job_dir='', main_job_dir='', gpus=0, gpu_type=None, array=None, num_combinations=1):
+def generate_slurm_script(job_name, script_path, output_path, error_path, time_hours=1, mem_per_cpu='4G', cpus_per_task=1, job_dir='', main_job_dir='', gpus=0, gpu_type=None, array=None, num_combinations=1, partition='batch.q'):
+    # Convert time_hours to SLURM time format (HH:MM:SS)
+    time_limit = f"{int(time_hours):02d}:00:00"
+
     # GPU request line
     gpu_request = ''
     if gpus > 0:
@@ -309,7 +407,7 @@ def generate_slurm_script(job_name, script_path, output_path, error_path, partit
 #SBATCH --job-name={job_name}
 #SBATCH --output={output_path}
 #SBATCH --error={error_path}
-#SBATCH --time={time}
+#SBATCH --time={time_limit}
 #SBATCH --partition={partition}
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -346,7 +444,15 @@ def monitor_job(job_id):
             print(f"Job {job_id} is still running...")  # Console output
             time.sleep(30)  # Wait before checking again
         else:
-            job_running = False
+            # Check if job completed or failed
+            sacct_result = subprocess.run(['sacct', '-j', str(job_id), '--format=State'], capture_output=True, text=True)
+            if 'COMPLETED' in sacct_result.stdout:
+                print(f"Job {job_id} completed successfully.")
+                job_running = False
+                return True
+            else:
+                print(f"Job {job_id} did not complete successfully.")
+                return False
     return True
 
 def collect_results(main_job_dir, task_type):
@@ -414,33 +520,40 @@ def display_leaderboard(results, task_type):
     else:
         metrics = ['Accuracy']
 
-    x_axis = st.selectbox("Select X-axis (Hyperparameter):", hyperparameters)
-    y_axis = st.selectbox("Select Y-axis (Metric):", metrics)
-    hue_option = st.selectbox("Select Hue (Optional):", [None] + hyperparameters)
+    x_axis = st.selectbox("Select X-axis (Hyperparameter):", hyperparameters, key='x_axis_selectbox')
+    y_axis = st.selectbox("Select Y-axis (Metric):", metrics, key='y_axis_selectbox')
+    hue_option = st.selectbox("Select Hue (Optional):", ['None'] + hyperparameters, key='hue_option_selectbox')
 
     # Convert categorical variables to strings
     for col in ['Optimizer', 'Loss Function']:
         leaderboard_df[col] = leaderboard_df[col].astype(str)
 
-    plt.figure(figsize=(10, 6))
+    # Prepare data for plotting
+    plot_df = leaderboard_df.copy()
+    plot_df[x_axis] = plot_df[x_axis].astype(str) if plot_df[x_axis].dtype == 'object' else plot_df[x_axis]
+    plot_df[y_axis] = pd.to_numeric(plot_df[y_axis], errors='coerce')
+    if hue_option != 'None':
+        plot_df[hue_option] = plot_df[hue_option].astype(str)
 
-    if leaderboard_df[x_axis].dtype == 'object' or leaderboard_df[x_axis].dtype == 'str':
-        # Categorical x-axis
-        sns.boxplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis])
+    # Create interactive plot using Plotly
+    if hue_option != 'None':
+        fig = px.scatter(
+            plot_df,
+            x=x_axis,
+            y=y_axis,
+            color=hue_option,
+            hover_data=hyperparameters + metrics
+        )
     else:
-        # Numerical x-axis
-        if hue_option and hue_option != 'None':
-            if leaderboard_df[hue_option].dtype == 'object' or leaderboard_df[hue_option].dtype == 'str':
-                sns.scatterplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis], hue=leaderboard_df[hue_option])
-            else:
-                sns.scatterplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis], hue=leaderboard_df[hue_option].astype(str))
-        else:
-            sns.scatterplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis])
-        sns.lineplot(x=leaderboard_df[x_axis], y=leaderboard_df[y_axis], estimator='mean', ci=None)
-    plt.title(f"{y_axis} vs {x_axis}")
-    plt.xlabel(x_axis)
-    plt.ylabel(y_axis)
-    st.pyplot(plt)
+        fig = px.scatter(
+            plot_df,
+            x=x_axis,
+            y=y_axis,
+            hover_data=hyperparameters + metrics
+        )
+
+    fig.update_layout(title=f"{y_axis} vs {x_axis}", xaxis_title=x_axis, yaxis_title=y_axis)
+    st.plotly_chart(fig)
     print("Visualization displayed.")
 
 if __name__ == '__main__':
