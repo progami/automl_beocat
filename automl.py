@@ -59,82 +59,153 @@ def main():
         st.success("Dataset uploaded successfully.")
         print("Dataset uploaded successfully.")  # Console output
 
+        # Model Selection
+        st.header("Model Selection")
+        model_options = ['Standard Neural Network', 'Conditional Variational Autoencoder (CVAE)']
+        selected_model = st.selectbox("Select the model to train:", model_options)
+
         columns = data.columns.tolist()
         if not columns:
             st.error("The uploaded dataset does not contain any columns.")
             print("Error: The uploaded dataset does not contain any columns.")  # Console output
             return
 
-        col1, col2 = st.columns(2)
-        with col1:
-            target_column = st.selectbox("Select the target (label) column:", columns)
-        with col2:
-            task_type = st.radio("Task Type:", ('Regression', 'Classification'))
+        if selected_model == 'Standard Neural Network':
+            col1, col2 = st.columns(2)
+            with col1:
+                target_column = st.selectbox("Select the target (label) column:", columns)
+            with col2:
+                task_type = st.radio("Task Type:", ('Regression', 'Classification'))
+        elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
+            st.write("Select input columns (to be reconstructed):")
+            input_columns = st.multiselect("Input Columns:", columns, default=columns[:9])
+
+            st.write("Select condition columns (conditioning variables):")
+            condition_columns = st.multiselect("Condition Columns:", columns, default=columns[9:])
     else:
         st.warning("Please upload a dataset to proceed.")
         print("Awaiting dataset upload...")  # Console output
         return
 
     # Hyperparameter Settings
-    st.header("Hyperparameter Settings")
+    if selected_model == 'Standard Neural Network':
+        st.header("Hyperparameter Settings")
+        col1, col2, col3 = st.columns(3)
 
-    col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**Batch Size**")
+            batch_size_options = [16, 32, 64, 128, 256]
+            batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options, default=[32, 64])
 
-    with col1:
-        st.markdown("**Batch Size**")
-        batch_size_options = [16, 32, 64, 128, 256]
-        batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options, default=[32, 64])
+            st.markdown("**Learning Rate**")
+            learning_rate_options = [0.0001, 0.001, 0.01, 0.1]
+            learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options, default=[0.001, 0.01])
 
-        st.markdown("**Learning Rate**")
-        learning_rate_options = [0.0001, 0.001, 0.01, 0.1]
-        learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options, default=[0.001, 0.01])
+        with col2:
+            st.markdown("**Epochs**")
+            epochs_options = [50, 100, 150, 200]
+            epochs_list = st.multiselect("Select Number of Epochs:", epochs_options, default=[100])
 
-    with col2:
-        st.markdown("**Epochs**")
-        epochs_options = [50, 100, 150, 200]
-        epochs_list = st.multiselect("Select Number of Epochs:", epochs_options, default=[100])
+            st.markdown("**Hidden Layer Size**")
+            hidden_size_options = [32, 64, 128, 256]
+            hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options, default=[64, 128])
 
-        st.markdown("**Hidden Layer Size**")
-        hidden_size_options = [32, 64, 128, 256]
-        hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options, default=[64, 128])
+        with col3:
+            st.markdown("**Optimizers**")
+            optimizer_options = ['Adam', 'SGD', 'RMSprop']
+            optimizers = st.multiselect("Select Optimizers:", optimizer_options, default=['Adam'])
 
-    with col3:
-        st.markdown("**Optimizers**")
-        optimizer_options = ['Adam', 'SGD', 'RMSprop']
-        optimizers = st.multiselect("Select Optimizers:", optimizer_options, default=['Adam'])
+            st.markdown("**Loss Functions**")
+            if task_type == 'Regression':
+                loss_function_options = ['MSELoss', 'L1Loss', 'SmoothL1Loss']
+            else:
+                loss_function_options = ['CrossEntropyLoss', 'NLLLoss']
+            loss_functions = st.multiselect("Select Loss Functions:", loss_function_options, default=[loss_function_options[0]])
 
-        st.markdown("**Loss Functions**")
-        if task_type == 'Regression':
-            loss_function_options = ['MSELoss', 'L1Loss', 'SmoothL1Loss']
-        else:
-            loss_function_options = ['CrossEntropyLoss', 'NLLLoss']
-        loss_functions = st.multiselect("Select Loss Functions:", loss_function_options, default=[loss_function_options[0]])
+        # Hyperparameters dictionary
+        hyperparams = {
+            'learning_rates': learning_rates,
+            'batch_sizes': batch_sizes,
+            'epochs_list': epochs_list,
+            'hidden_sizes': hidden_sizes,
+            'optimizers': optimizers,
+            'loss_functions': loss_functions
+        }
 
-    # Hyperparameters dictionary
-    hyperparams = {
-        'learning_rates': learning_rates,
-        'batch_sizes': batch_sizes,
-        'epochs_list': epochs_list,
-        'hidden_sizes': hidden_sizes,
-        'optimizers': optimizers,
-        'loss_functions': loss_functions
-    }
+        # Generate hyperparameter combinations
+        combinations = generate_hyperparameter_combinations(hyperparams)
+        num_combinations = len(combinations)
+        st.write(f"Total hyperparameter combinations: {num_combinations}")
 
-    # Generate hyperparameter combinations
-    combinations = generate_hyperparameter_combinations(hyperparams)
-    num_combinations = len(combinations)
-    st.write(f"Total hyperparameter combinations: {num_combinations}")
+    elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
+        st.header("Hyperparameter Settings for CVAE")
 
-    # Display combinations
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            latent_dims = st.multiselect("Select Latent Dimensions:", [512, 1024, 2048], default=[512, 1024])
+
+            epochs_list = st.multiselect("Select Number of Epochs:", [100, 200, 300], default=[100])
+
+            batch_sizes = st.multiselect("Select Batch Sizes:", [256, 512, 1024], default=[256, 512])
+
+            learning_rates = st.multiselect("Select Learning Rates:", [0.01, 0.001, 0.0001, 0.00001], default=[0.001, 0.0001])
+
+        with col2:
+            activation_functions = st.multiselect("Select Activation Functions:", ['Sigmoid', 'ReLU', 'Tanh', 'ELU'], default=['ReLU'])
+
+            position_norm_methods = st.multiselect("Select Position Normalization Methods:", ['StandardScaler', 'None'], default=['StandardScaler'])
+
+            momenta_norm_methods = st.multiselect("Select Momenta Normalization Methods:", ['StandardScaler', 'None'], default=['StandardScaler'])
+
+        with col3:
+            use_l1 = st.checkbox("Use L1 Regularization")
+            if use_l1:
+                l1_lambdas = st.multiselect("Select L1 Lambda Values:", [0.001, 0.01, 0.1, 0.5], default=[0.001])
+            else:
+                l1_lambdas = [0.0]
+
+            use_l2 = st.checkbox("Use L2 Regularization")
+            if use_l2:
+                l2_lambdas = st.multiselect("Select L2 Lambda Values:", [0.001, 0.01, 0.1, 0.5], default=[0.001])
+            else:
+                l2_lambdas = [0.0]
+
+            num_hidden_layers = st.multiselect("Select Number of Hidden Layers:", [1, 2, 3, 4], default=[2])
+
+            hidden_layer_sizes = st.multiselect("Select Hidden Layer Sizes:", [64, 128, 256], default=[128])
+
+        # Fixed hyperparameters
+        patience = 100
+        min_delta = 1e-5
+
+        # Hyperparameters dictionary for CVAE
+        hyperparams = {
+            'LATENT_DIM': latent_dims,
+            'EPOCHS': epochs_list,
+            'BATCH_SIZE': batch_sizes,
+            'LEARNING_RATE': learning_rates,
+            'PATIENCE': [patience],
+            'MIN_DELTA': [min_delta],
+            'activation_name': activation_functions,
+            'position_norm_method': position_norm_methods,
+            'momenta_norm_method': momenta_norm_methods,
+            'use_l1': [use_l1],
+            'L1_LAMBDA': l1_lambdas,
+            'use_l2': [use_l2],
+            'L2_LAMBDA': l2_lambdas,
+            'num_hidden_layers': num_hidden_layers,
+            'hidden_layer_size': hidden_layer_sizes
+        }
+
+        # Generate hyperparameter combinations for CVAE
+        combinations = generate_hyperparameter_combinations_cvae(hyperparams)
+        num_combinations = len(combinations)
+        st.write(f"Total hyperparameter combinations: {num_combinations}")
+
+    # Display combinations if not too many
     if num_combinations <= 100:
-        combination_df = pd.DataFrame(combinations, columns=[
-            'Learning Rate',
-            'Batch Size',
-            'Epochs',
-            'Hidden Size',
-            'Optimizer',
-            'Loss Function'
-        ])
+        combination_df = pd.DataFrame(combinations)
         st.dataframe(combination_df)
     else:
         st.warning("Too many combinations to display.")
@@ -248,64 +319,101 @@ def main():
         print(f"Created main job directory: {main_job_dir}")  # Console output
 
         # Preprocess the data
-        try:
-            X = data.drop(columns=[target_column])
-            y = data[target_column]
-        except KeyError:
-            st.error(f"Target column '{target_column}' not found in the dataset.")
-            print(f"Error: Target column '{target_column}' not found in the dataset.")  # Console output
-            return
+        if selected_model == 'Standard Neural Network':
+            # Existing code for data preprocessing
+            try:
+                X = data.drop(columns=[target_column])
+                y = data[target_column]
+            except KeyError:
+                st.error(f"Target column '{target_column}' not found in the dataset.")
+                print(f"Error: Target column '{target_column}' not found in the dataset.")  # Console output
+                return
 
-        # Encode categorical features
-        X = pd.get_dummies(X)
+            # Encode categorical features
+            X = pd.get_dummies(X)
 
-        # Feature scaling
-        X = X.values.astype(np.float32)
-        X_mean = X.mean(axis=0)
-        X_std = X.std(axis=0) + 1e-8  # Avoid division by zero
-        X = (X - X_mean) / X_std
+            # Feature scaling
+            X = X.values.astype(np.float32)
+            X_mean = X.mean(axis=0)
+            X_std = X.std(axis=0) + 1e-8  # Avoid division by zero
+            X = (X - X_mean) / X_std
 
-        # Convert to PyTorch tensors
-        X = torch.tensor(X, dtype=torch.float32)
+            # Convert to PyTorch tensors
+            X = torch.tensor(X, dtype=torch.float32)
 
-        # Process target variable
-        if task_type == 'Classification':
-            # Encode target labels
-            if y.dtype == 'object':
-                y = pd.Categorical(y).codes
+            # Process target variable
+            if task_type == 'Classification':
+                # Encode target labels
+                if y.dtype == 'object':
+                    y = pd.Categorical(y).codes
+                else:
+                    y = y.astype(int)
+                y = torch.tensor(y.values, dtype=torch.long)
             else:
-                y = y.astype(int)
-            y = torch.tensor(y.values, dtype=torch.long)
-        else:
-            y = y.values.reshape(-1, 1).astype(np.float32)
-            y = torch.tensor(y, dtype=torch.float32)
+                y = y.values.reshape(-1, 1).astype(np.float32)
+                y = torch.tensor(y, dtype=torch.float32)
 
-        # Split the data
-        dataset = TensorDataset(X, y)
-        if len(dataset) < 2:
-            st.error("The dataset is too small to split into training and testing sets.")
-            print("Error: The dataset is too small to split into training and testing sets.")  # Console output
-            return
-        train_size = int(0.8 * len(dataset))
-        test_size = len(dataset) - train_size
-        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+            # Split the data
+            dataset = TensorDataset(X, y)
+            if len(dataset) < 2:
+                st.error("The dataset is too small to split into training and testing sets.")
+                print("Error: The dataset is too small to split into training and testing sets.")  # Console output
+                return
+            train_size = int(0.8 * len(dataset))
+            test_size = len(dataset) - train_size
+            train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
 
-        X_train, y_train = zip(*train_dataset)
-        X_train = torch.stack(X_train)
-        y_train = torch.stack(y_train)
+            X_train, y_train = zip(*train_dataset)
+            X_train = torch.stack(X_train)
+            y_train = torch.stack(y_train)
 
-        X_test, y_test = zip(*test_dataset)
-        X_test = torch.stack(X_test)
-        y_test = torch.stack(y_test)
+            X_test, y_test = zip(*test_dataset)
+            X_test = torch.stack(X_test)
+            y_test = torch.stack(y_test)
 
-        # Save data and task_type in the main job directory
-        with open(os.path.join(main_job_dir, 'data.pkl'), 'wb') as f:
-            pickle.dump((X_train, y_train, X_test, y_test), f)
-        with open(os.path.join(main_job_dir, 'params.pkl'), 'wb') as f:
-            pickle.dump({'task_type': task_type}, f)
-        with open(os.path.join(main_job_dir, 'combinations.pkl'), 'wb') as f:
-            pickle.dump(combinations, f)
-        print("Data, task_type, and hyperparameter combinations saved.")  # Console output
+            # Save data and task_type in the main job directory
+            with open(os.path.join(main_job_dir, 'data.pkl'), 'wb') as f:
+                pickle.dump((X_train, y_train, X_test, y_test), f)
+            with open(os.path.join(main_job_dir, 'params.pkl'), 'wb') as f:
+                params = {'task_type': task_type, 'selected_model': selected_model}
+                pickle.dump(params, f)
+            with open(os.path.join(main_job_dir, 'combinations.pkl'), 'wb') as f:
+                pickle.dump(combinations, f)
+            print("Data, task_type, and hyperparameter combinations saved.")  # Console output
+
+        elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
+            # For CVAE, we need to split the data into input and condition
+            try:
+                input_data = data[input_columns]
+                condition_data = data[condition_columns]
+            except KeyError as e:
+                st.error(f"Column not found in the dataset: {e}")
+                print(f"Error: Column not found in the dataset: {e}")  # Console output
+                return
+
+            # Convert to numpy arrays
+            input_data = input_data.values
+            condition_data = condition_data.values
+
+            # Split data into train, validation, test sets
+            from sklearn.model_selection import train_test_split
+
+            train_input, temp_input, train_condition, temp_condition = train_test_split(
+                input_data, condition_data, test_size=0.3, random_state=85, shuffle=True
+            )
+            val_input, test_input, val_condition, test_condition = train_test_split(
+                temp_input, temp_condition, test_size=0.5, random_state=42, shuffle=True
+            )
+
+            # Save data and selected model in the main job directory
+            with open(os.path.join(main_job_dir, 'data.pkl'), 'wb') as f:
+                pickle.dump((train_input, val_input, test_input, train_condition, val_condition, test_condition), f)
+            with open(os.path.join(main_job_dir, 'params.pkl'), 'wb') as f:
+                params = {'selected_model': selected_model}
+                pickle.dump(params, f)
+            with open(os.path.join(main_job_dir, 'combinations.pkl'), 'wb') as f:
+                pickle.dump(combinations, f)
+            print("Data, selected model, and hyperparameter combinations saved.")
 
         # Generate SLURM script for the job array
         job_dir = os.path.join(main_job_dir, 'jobs')
@@ -353,11 +461,11 @@ def main():
                     st.success("All jobs completed successfully.")
                     print("All jobs completed successfully.")
                     # Load and store results
-                    results = collect_results(main_job_dir, task_type)
+                    results = collect_results(main_job_dir, selected_model)
                     if results:
                         # Store results in session state
                         st.session_state['results'] = results
-                        st.session_state['task_type'] = task_type
+                        st.session_state['selected_model'] = selected_model
                         # Do not call display_leaderboard here
                         # It will be called at the end of main()
                     else:
@@ -371,8 +479,8 @@ def main():
                 print("Error: Could not parse job ID from submission output.")
 
     # Check if results are available in session state for visualization
-    if 'results' in st.session_state and 'task_type' in st.session_state:
-        display_leaderboard(st.session_state['results'], st.session_state['task_type'])
+    if 'results' in st.session_state and 'selected_model' in st.session_state:
+        display_leaderboard(st.session_state['results'], st.session_state['selected_model'])
 
 def generate_hyperparameter_combinations(hyperparams):
     combinations = list(product(
@@ -383,6 +491,11 @@ def generate_hyperparameter_combinations(hyperparams):
         hyperparams['optimizers'],
         hyperparams['loss_functions']
     ))
+    return combinations
+
+def generate_hyperparameter_combinations_cvae(hyperparams):
+    keys, values = zip(*hyperparams.items())
+    combinations = [dict(zip(keys, v)) for v in product(*values)]
     return combinations
 
 def generate_slurm_script(job_name, script_path, output_path, error_path, time_hours=1, mem_per_cpu='4G', cpus_per_task=1, job_dir='', main_job_dir='', gpus=0, gpu_type=None, array=None, num_combinations=1, partition='batch.q'):
@@ -455,7 +568,7 @@ def monitor_job(job_id):
                 return False
     return True
 
-def collect_results(main_job_dir, task_type):
+def collect_results(main_job_dir, selected_model):
     results = []
     results_dir = os.path.join(main_job_dir, 'results')
     if os.path.exists(results_dir):
@@ -478,7 +591,7 @@ def collect_results(main_job_dir, task_type):
                                 results.append(result)
     return results if results else None
 
-def display_leaderboard(results, task_type):
+def display_leaderboard(results, selected_model):
     st.header("Leaderboard")
     print("Generating leaderboard...")
     # Prepare DataFrame
@@ -486,26 +599,21 @@ def display_leaderboard(results, task_type):
     for result in results:
         entry = {
             'Task ID': result['Task ID'],
-            'Learning Rate': result['Hyperparameters']['learning_rate'],
-            'Batch Size': result['Hyperparameters']['batch_size'],
-            'Epochs': result['Hyperparameters']['epochs'],
-            'Hidden Size': result['Hyperparameters']['hidden_size'],
-            'Optimizer': result['Hyperparameters']['optimizer'],
-            'Loss Function': result['Hyperparameters']['loss_function'],
         }
-        if task_type == 'Regression':
-            entry['MSE'] = result['MSE']
-            entry['RMSE'] = result['RMSE']
-            entry['R2'] = result['R2']
-        else:
-            entry['Accuracy'] = result['Accuracy']
+        entry.update(result['Hyperparameters'])
+        if selected_model == 'Standard Neural Network':
+            if 'MSE' in result:
+                entry['MSE'] = result['MSE']
+                entry['RMSE'] = result['RMSE']
+                entry['R2'] = result['R2']
+            else:
+                entry['Accuracy'] = result['Accuracy']
+        elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
+            metrics = result.get('Metrics', {})
+            entry.update(metrics)
         leaderboard_data.append(entry)
 
     leaderboard_df = pd.DataFrame(leaderboard_data)
-    if task_type == 'Regression':
-        leaderboard_df = leaderboard_df.sort_values(by='MSE')
-    else:
-        leaderboard_df = leaderboard_df.sort_values(by='Accuracy', ascending=False)
     st.dataframe(leaderboard_df)
     print("Leaderboard displayed.")
 
@@ -513,20 +621,25 @@ def display_leaderboard(results, task_type):
     st.header("Performance Visualization")
     st.write("Select hyperparameters and metrics to visualize their relationships.")
 
-    # List of hyperparameters and metrics
-    hyperparameters = ['Learning Rate', 'Batch Size', 'Epochs', 'Hidden Size', 'Optimizer', 'Loss Function']
-    if task_type == 'Regression':
-        metrics = ['MSE', 'RMSE', 'R2']
-    else:
-        metrics = ['Accuracy']
+    if selected_model == 'Standard Neural Network':
+        # List of hyperparameters and metrics
+        hyperparameters = ['learning_rate', 'batch_size', 'epochs', 'hidden_size', 'optimizer', 'loss_function']
+        if 'MSE' in leaderboard_df.columns:
+            metrics = ['MSE', 'RMSE', 'R2']
+        else:
+            metrics = ['Accuracy']
+    elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
+        hyperparameters = list(result['Hyperparameters'].keys())
+        metrics = [key for key in leaderboard_df.columns if key.endswith('_mre') or key.endswith('_mse')]
 
     x_axis = st.selectbox("Select X-axis (Hyperparameter):", hyperparameters, key='x_axis_selectbox')
     y_axis = st.selectbox("Select Y-axis (Metric):", metrics, key='y_axis_selectbox')
     hue_option = st.selectbox("Select Hue (Optional):", ['None'] + hyperparameters, key='hue_option_selectbox')
 
     # Convert categorical variables to strings
-    for col in ['Optimizer', 'Loss Function']:
-        leaderboard_df[col] = leaderboard_df[col].astype(str)
+    for col in hyperparameters:
+        if leaderboard_df[col].dtype == 'object':
+            leaderboard_df[col] = leaderboard_df[col].astype(str)
 
     # Prepare data for plotting
     plot_df = leaderboard_df.copy()
