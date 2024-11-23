@@ -54,7 +54,10 @@ def generate_slurm_script(
 cd {script_dir}
 
 echo "Starting task ${{SLURM_ARRAY_TASK_ID}}"
-srun python {script_name} ${{SLURM_ARRAY_TASK_ID}} {main_job_dir}
+
+TOTAL_TASKS={num_combinations}
+
+srun python {script_name} --task_id ${{SLURM_ARRAY_TASK_ID}} --total_tasks $TOTAL_TASKS --main_job_dir {main_job_dir}
 """
 
     return slurm_script
