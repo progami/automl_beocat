@@ -22,6 +22,10 @@ def main():
     total_resources_placeholder = st.empty()  # Placeholder for total resources
     print("Starting AutoML on Beocat application...")  # Console output
 
+    # Initialize session state for resource menu visibility
+    if 'show_resources' not in st.session_state:
+        st.session_state['show_resources'] = True
+
     # Custom CSS for the sticky info box in the upper right corner
     st.markdown(
         """
@@ -44,14 +48,22 @@ def main():
 
     # Function to display total resources in the custom div
     def display_total_resources(info_text):
-        total_resources_placeholder.markdown(
-            f"""
-            <div class="total-resources">
-            {info_text}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        if st.session_state['show_resources']:
+            total_resources_placeholder.markdown(
+                f"""
+                <div class="total-resources">
+                {info_text}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        else:
+            # Clear the placeholder
+            total_resources_placeholder.empty()
+
+    # Add a button to toggle the visibility of the resources menu
+    if st.button("Toggle Resources Menu"):
+        st.session_state['show_resources'] = not st.session_state['show_resources']
 
     # Dataset and Task Selection
     st.header("Dataset and Task Selection")
@@ -468,9 +480,18 @@ def main():
                 print(f"Error: Column not found in the dataset: {e}")  # Console output
                 return
 
+            # Normalize input and condition data
+            from sklearn.preprocessing import StandardScaler
+
+            input_scaler = StandardScaler()
+            condition_scaler = StandardScaler()
+
+            input_data = input_scaler.fit_transform(input_data)
+            condition_data = condition_scaler.fit_transform(condition_data)
+
             # Convert to numpy arrays
-            input_data = input_data.values
-            condition_data = condition_data.values
+            input_data = input_data.astype(np.float32)
+            condition_data = condition_data.astype(np.float32)
 
             # Split data into train, validation, test sets
             train_input, temp_input, train_condition, temp_condition = train_test_split(
@@ -570,7 +591,7 @@ def main():
     # The leaderboard will be displayed automatically after jobs complete
 
 def create_main_job_dir():
-    base_dir = "run_"
+    base_dir = "job_"
     existing_dirs = [d for d in os.listdir('.') if os.path.isdir(d) and d.startswith(base_dir)]
     numbers = [int(d.replace(base_dir, '')) for d in existing_dirs if d.replace(base_dir, '').isdigit()]
     if numbers:
@@ -700,7 +721,6 @@ def display_leaderboard(results, selected_model):
 
     x_axis = st.selectbox("Select X-axis (Hyperparameter):", hyperparameters, key='x_axis_selectbox')
     y_axis = st.selectbox("Select Y-axis (Metric):", metrics, key='y_axis_selectbox')
-    hue_option = st.selectbox("Select Hue (Optional):", ['None'] + hyperparameters, key='hue_option_selectbox')
 
     # Convert categorical variables to strings
     for col in hyperparameters:
@@ -711,25 +731,14 @@ def display_leaderboard(results, selected_model):
     plot_df = results.copy()
     plot_df[x_axis] = plot_df[x_axis].astype(str) if plot_df[x_axis].dtype == 'object' else plot_df[x_axis]
     plot_df[y_axis] = pd.to_numeric(plot_df[y_axis], errors='coerce')
-    if hue_option != 'None':
-        plot_df[hue_option] = plot_df[hue_option].astype(str)
 
     # Create interactive plot using Plotly
-    if hue_option != 'None':
-        fig = px.scatter(
-            plot_df,
-            x=x_axis,
-            y=y_axis,
-            color=hue_option,
-            hover_data=hyperparameters + metrics
-        )
-    else:
-        fig = px.scatter(
-            plot_df,
-            x=x_axis,
-            y=y_axis,
-            hover_data=hyperparameters + metrics
-        )
+    fig = px.scatter(
+        plot_df,
+        x=x_axis,
+        y=y_axis,
+        hover_data=hyperparameters + metrics
+    )
 
     fig.update_layout(title=f"{y_axis} vs {x_axis}", xaxis_title=x_axis, yaxis_title=y_axis)
     st.plotly_chart(fig)

@@ -51,7 +51,7 @@ def main():
     elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
         train_input, val_input, test_input, train_condition, val_condition, test_condition = data
         # Training code for CVAE
-        metrics = train_cvae(train_input, val_input, test_input, train_condition, val_condition, test_condition, hyperparams)
+        metrics = train_cvae(train_input, val_input, test_input, train_condition, val_condition, test_condition, hyperparams, task_id)
     else:
         raise ValueError(f"Unknown model type: {selected_model}")
 
@@ -72,8 +72,9 @@ def main():
         else:
             results_df = pd.read_csv(results_csv_path)
 
-        # Append the new results
-        results_df = results_df.append(results_row, ignore_index=True)
+        # Append the new results using pd.concat
+        new_row_df = pd.DataFrame([results_row])
+        results_df = pd.concat([results_df, new_row_df], ignore_index=True)
         results_df.to_csv(results_csv_path, index=False)
 
     print(f"Task {task_id} completed and results saved.")
@@ -177,7 +178,7 @@ def train_standard_nn(X_train, y_train, X_test, y_test, hyperparams, task_type):
 
     return metrics
 
-def train_cvae(train_input, val_input, test_input, train_condition, val_condition, test_condition, hyperparams):
+def train_cvae(train_input, val_input, test_input, train_condition, val_condition, test_condition, hyperparams, task_id):
     # Unpack hyperparameters
     LATENT_DIM = hyperparams['LATENT_DIM']
     EPOCHS = hyperparams['EPOCHS']
@@ -221,6 +222,9 @@ def train_cvae(train_input, val_input, test_input, train_condition, val_conditio
     with torch.no_grad():
         for x, c in test_loader:
             recon_x, mu, logvar = model(x, c)
+            if torch.isnan(recon_x).any():
+                print(f"NaN detected in recon_x at task {task_id}")
+                recon_x = torch.nan_to_num(recon_x)
             reconstructions.append(recon_x)
             originals.append(x)
 
@@ -229,6 +233,13 @@ def train_cvae(train_input, val_input, test_input, train_condition, val_conditio
 
     y_pred = reconstructions.numpy()
     y_true = originals.numpy()
+
+    # Check for NaNs in y_pred and y_true
+    if np.isnan(y_pred).any() or np.isnan(y_true).any():
+        print(f"NaN detected in y_pred or y_true at task {task_id}")
+        # Replace NaNs with zeros
+        y_pred = np.nan_to_num(y_pred)
+        y_true = np.nan_to_num(y_true)
 
     mse = mean_squared_error(y_true.flatten(), y_pred.flatten())
     mae = np.mean(np.abs(y_true - y_pred))
@@ -296,9 +307,10 @@ class CVAE(nn.Module):
         return recon_x, mu, logvar
 
 def loss_function_cvae(recon_x, x, mu, logvar):
-    BCE = nn.functional.mse_loss(recon_x, x, reduction='sum')
-    # KL divergence
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    # Use reduction='mean' to prevent large loss values
+    BCE = nn.functional.mse_loss(recon_x, x, reduction='mean')
+    # Numerically stable KL divergence
+    KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - torch.exp(logvar))
     return BCE + KLD
 
 def get_activation_function(name):
