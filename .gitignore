@@ -7,3 +7,4 @@ run_*
 *.pyc
 *.swp
 __pycache__/
+job_*
