@@ -15,6 +15,7 @@ from itertools import product
 import plotly.express as px
 import json
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 def main():
     st.set_page_config(layout="wide")
@@ -103,13 +104,13 @@ def main():
                 return
         elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
             st.write("Select input columns (to be reconstructed):")
-            input_columns = st.multiselect("Input Columns:", columns, default=columns[:9])
+            input_columns = st.multiselect("Input Columns:", columns)
             if not input_columns:
                 st.error("Please select at least one input column.")
                 return
 
             st.write("Select condition columns (conditioning variables):")
-            condition_columns = st.multiselect("Condition Columns:", columns, default=columns[9:])
+            condition_columns = st.multiselect("Condition Columns:", columns)
             if not condition_columns:
                 st.error("Please select at least one condition column.")
                 return
@@ -126,14 +127,14 @@ def main():
         with col1:
             st.markdown("**Batch Size**")
             batch_size_options = [16, 32, 64, 128, 256]
-            batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options, default=[32, 64])
+            batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options)
             if not batch_sizes:
                 st.error("Please select at least one batch size.")
                 return
 
             st.markdown("**Learning Rate**")
             learning_rate_options = [0.0001, 0.001, 0.01, 0.1]
-            learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options, default=[0.001, 0.01])
+            learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options)
             if not learning_rates:
                 st.error("Please select at least one learning rate.")
                 return
@@ -141,14 +142,14 @@ def main():
         with col2:
             st.markdown("**Epochs**")
             epochs_options = [50, 100, 150, 200]
-            epochs_list = st.multiselect("Select Number of Epochs:", epochs_options, default=[100])
+            epochs_list = st.multiselect("Select Number of Epochs:", epochs_options)
             if not epochs_list:
                 st.error("Please select at least one number of epochs.")
                 return
 
             st.markdown("**Hidden Layer Size**")
             hidden_size_options = [32, 64, 128, 256]
-            hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options, default=[64, 128])
+            hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options)
             if not hidden_sizes:
                 st.error("Please select at least one hidden layer size.")
                 return
@@ -156,7 +157,7 @@ def main():
         with col3:
             st.markdown("**Optimizers**")
             optimizer_options = ['Adam', 'SGD', 'RMSprop']
-            optimizers = st.multiselect("Select Optimizers:", optimizer_options, default=['Adam'])
+            optimizers = st.multiselect("Select Optimizers:", optimizer_options)
             if not optimizers:
                 st.error("Please select at least one optimizer.")
                 return
@@ -164,11 +165,9 @@ def main():
             st.markdown("**Loss Functions**")
             if task_type == 'Regression':
                 loss_function_options = ['MSELoss', 'L1Loss', 'SmoothL1Loss']
-                default_loss_functions = ['MSELoss']
             else:
                 loss_function_options = ['CrossEntropyLoss', 'NLLLoss']
-                default_loss_functions = ['CrossEntropyLoss']
-            loss_functions = st.multiselect("Select Loss Functions:", loss_function_options, default=default_loss_functions)
+            loss_functions = st.multiselect("Select Loss Functions:", loss_function_options)
             if not loss_functions:
                 st.error("Please select at least one loss function.")
                 return
@@ -194,46 +193,46 @@ def main():
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            latent_dims = st.multiselect("Select Latent Dimensions:", [512, 1024, 2048], default=[512, 1024])
+            latent_dims = st.multiselect("Select Latent Dimensions:", [8, 16, 32, 64, 128])
             if not latent_dims:
                 st.error("Please select at least one latent dimension.")
                 return
 
-            epochs_list = st.multiselect("Select Number of Epochs:", [100, 200, 300], default=[100])
+            epochs_list = st.multiselect("Select Number of Epochs:", [50, 100, 200, 300])
             if not epochs_list:
                 st.error("Please select at least one number of epochs.")
                 return
 
-            batch_sizes = st.multiselect("Select Batch Sizes:", [256, 512, 1024], default=[256, 512])
+            batch_sizes = st.multiselect("Select Batch Sizes:", [16, 32, 64, 128])
             if not batch_sizes:
                 st.error("Please select at least one batch size.")
                 return
 
-            learning_rates = st.multiselect("Select Learning Rates:", [0.01, 0.001, 0.0001, 0.00001], default=[0.001, 0.0001])
+            learning_rates = st.multiselect("Select Learning Rates:", [0.01, 0.001, 0.0001])
             if not learning_rates:
                 st.error("Please select at least one learning rate.")
                 return
 
         with col2:
-            activation_functions = st.multiselect("Select Activation Functions:", ['Sigmoid', 'ReLU', 'Tanh', 'ELU'], default=['ReLU'])
+            activation_functions = st.multiselect("Select Activation Functions:", ['Sigmoid', 'ReLU', 'Tanh', 'ELU'])
             if not activation_functions:
                 st.error("Please select at least one activation function.")
                 return
 
-            position_norm_methods = st.multiselect("Select Position Normalization Methods:", ['StandardScaler', 'None'], default=['StandardScaler'])
-            if not position_norm_methods:
-                st.error("Please select at least one position normalization method.")
+            num_hidden_layers = st.multiselect("Select Number of Hidden Layers:", [1, 2, 3, 4])
+            if not num_hidden_layers:
+                st.error("Please select at least one number of hidden layers.")
                 return
 
-            momenta_norm_methods = st.multiselect("Select Momenta Normalization Methods:", ['StandardScaler', 'None'], default=['StandardScaler'])
-            if not momenta_norm_methods:
-                st.error("Please select at least one momenta normalization method.")
+            hidden_layer_sizes = st.multiselect("Select Hidden Layer Sizes:", [64, 128, 256])
+            if not hidden_layer_sizes:
+                st.error("Please select at least one hidden layer size.")
                 return
 
         with col3:
             use_l1 = st.checkbox("Use L1 Regularization")
             if use_l1:
-                l1_lambdas = st.multiselect("Select L1 Lambda Values:", [0.001, 0.01, 0.1, 0.5], default=[0.001])
+                l1_lambdas = st.multiselect("Select L1 Lambda Values:", [0.001, 0.01, 0.1])
                 if not l1_lambdas:
                     st.error("Please select at least one L1 lambda value.")
                     return
@@ -242,26 +241,16 @@ def main():
 
             use_l2 = st.checkbox("Use L2 Regularization")
             if use_l2:
-                l2_lambdas = st.multiselect("Select L2 Lambda Values:", [0.001, 0.01, 0.1, 0.5], default=[0.001])
+                l2_lambdas = st.multiselect("Select L2 Lambda Values:", [0.001, 0.01, 0.1])
                 if not l2_lambdas:
                     st.error("Please select at least one L2 lambda value.")
                     return
             else:
                 l2_lambdas = [0.0]
 
-            num_hidden_layers = st.multiselect("Select Number of Hidden Layers:", [1, 2, 3, 4], default=[2])
-            if not num_hidden_layers:
-                st.error("Please select at least one number of hidden layers.")
-                return
-
-            hidden_layer_sizes = st.multiselect("Select Hidden Layer Sizes:", [64, 128, 256], default=[128])
-            if not hidden_layer_sizes:
-                st.error("Please select at least one hidden layer size.")
-                return
-
-        # Fixed hyperparameters
-        patience = 100
-        min_delta = 1e-5
+            # Fixed hyperparameters
+            patience = 10
+            min_delta = 1e-5
 
         # Hyperparameters dictionary for CVAE
         hyperparams = {
@@ -269,17 +258,15 @@ def main():
             'EPOCHS': epochs_list,
             'BATCH_SIZE': batch_sizes,
             'LEARNING_RATE': learning_rates,
-            'PATIENCE': [patience],
-            'MIN_DELTA': [min_delta],
             'activation_name': activation_functions,
-            'position_norm_method': position_norm_methods,
-            'momenta_norm_method': momenta_norm_methods,
+            'num_hidden_layers': num_hidden_layers,
+            'hidden_layer_size': hidden_layer_sizes,
             'use_l1': [use_l1],
             'L1_LAMBDA': l1_lambdas,
             'use_l2': [use_l2],
             'L2_LAMBDA': l2_lambdas,
-            'num_hidden_layers': num_hidden_layers,
-            'hidden_layer_size': hidden_layer_sizes
+            'PATIENCE': [patience],
+            'MIN_DELTA': [min_delta]
         }
 
         # Generate hyperparameter combinations for CVAE
@@ -399,10 +386,7 @@ def main():
 
     # Start training button
     if st.button("Start Training"):
-        max_combinations_limit = 5000  # Upper limit
-        if num_combinations > max_combinations_limit:
-            st.error(f"Too many hyperparameter combinations selected ({num_combinations}). Please reduce the number to less than {max_combinations_limit} to manage resource usage.")
-            return
+        # Removed the limit on maximum hyperparameter combinations
         st.info("Preparing data and submitting jobs to SLURM...")
         print("Preparing data and submitting jobs to SLURM...")  # Console output
 
@@ -413,98 +397,38 @@ def main():
         # Preprocess the data
         if selected_model == 'Standard Neural Network':
             # Data preprocessing for standard neural network
-            try:
-                X = data[feature_columns]
-                y = data[target_column]
-            except KeyError as e:
-                st.error(f"Column not found in the dataset: {e}")
-                print(f"Error: Column not found in the dataset: {e}")  # Console output
+            X_train, y_train, X_test, y_test = prepare_standard_nn_data(data, feature_columns, target_column, task_type)
+            if X_train is None:
+                st.error("Data preprocessing failed.")
                 return
-
-            # Encode categorical features
-            X = pd.get_dummies(X)
-
-            # Feature scaling
-            X = X.values.astype(np.float32)
-            X_mean = X.mean(axis=0)
-            X_std = X.std(axis=0) + 1e-8  # Avoid division by zero
-            X = (X - X_mean) / X_std
-
-            # Convert to PyTorch tensors
-            X = torch.tensor(X, dtype=torch.float32)
-
-            # Process target variable
-            if task_type == 'Classification':
-                # Encode target labels
-                if y.dtype == 'object':
-                    y = pd.Categorical(y).codes
-                else:
-                    y = y.astype(int)
-                y = torch.tensor(y.values, dtype=torch.long)
-            else:
-                y = y.values.reshape(-1, 1).astype(np.float32)
-                y = torch.tensor(y, dtype=torch.float32)
-
-            # Split the data
-            dataset = TensorDataset(X, y)
-            if len(dataset) < 2:
-                st.error("The dataset is too small to split into training and testing sets.")
-                print("Error: The dataset is too small to split into training and testing sets.")  # Console output
-                return
-            train_size = int(0.8 * len(dataset))
-            test_size = len(dataset) - train_size
-            train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-
-            X_train, y_train = zip(*train_dataset)
-            X_train = torch.stack(X_train)
-            y_train = torch.stack(y_train)
-
-            X_test, y_test = zip(*test_dataset)
-            X_test = torch.stack(X_test)
-            y_test = torch.stack(y_test)
 
             # Save data and task_type in the main job directory
             with open(os.path.join(main_job_dir, 'data.pkl'), 'wb') as f:
                 pickle.dump((X_train, y_train, X_test, y_test), f)
-            params = {'task_type': task_type, 'selected_model': selected_model}
+            params = {
+                'task_type': task_type,
+                'selected_model': selected_model,
+                'input_columns': feature_columns,
+                'target_column': target_column
+            }
             with open(os.path.join(main_job_dir, 'params.json'), 'w') as f:
                 json.dump(params, f)
 
         elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
             # For CVAE, we need to split the data into input and condition
-            try:
-                input_data = data[input_columns]
-                condition_data = data[condition_columns]
-            except KeyError as e:
-                st.error(f"Column not found in the dataset: {e}")
-                print(f"Error: Column not found in the dataset: {e}")  # Console output
+            train_input, val_input, test_input, train_condition, val_condition, test_condition = prepare_cvae_data(data, input_columns, condition_columns)
+            if train_input is None:
+                st.error("Data preprocessing failed.")
                 return
-
-            # Normalize input and condition data
-            from sklearn.preprocessing import StandardScaler
-
-            input_scaler = StandardScaler()
-            condition_scaler = StandardScaler()
-
-            input_data = input_scaler.fit_transform(input_data)
-            condition_data = condition_scaler.fit_transform(condition_data)
-
-            # Convert to numpy arrays
-            input_data = input_data.astype(np.float32)
-            condition_data = condition_data.astype(np.float32)
-
-            # Split data into train, validation, test sets
-            train_input, temp_input, train_condition, temp_condition = train_test_split(
-                input_data, condition_data, test_size=0.3, random_state=85, shuffle=True
-            )
-            val_input, test_input, val_condition, test_condition = train_test_split(
-                temp_input, temp_condition, test_size=0.5, random_state=42, shuffle=True
-            )
 
             # Save data and selected model in the main job directory
             with open(os.path.join(main_job_dir, 'data.pkl'), 'wb') as f:
                 pickle.dump((train_input, val_input, test_input, train_condition, val_condition, test_condition), f)
-            params = {'selected_model': selected_model}
+            params = {
+                'selected_model': selected_model,
+                'input_columns': input_columns,
+                'condition_columns': condition_columns
+            }
             with open(os.path.join(main_job_dir, 'params.json'), 'w') as f:
                 json.dump(params, f)
 
@@ -743,6 +667,88 @@ def display_leaderboard(results, selected_model):
     fig.update_layout(title=f"{y_axis} vs {x_axis}", xaxis_title=x_axis, yaxis_title=y_axis)
     st.plotly_chart(fig)
     print("Visualization displayed.")
+
+def prepare_standard_nn_data(data, feature_columns, target_column, task_type):
+    try:
+        X = data[feature_columns]
+        y = data[target_column]
+    except KeyError as e:
+        print(f"Error: Column not found in the dataset: {e}")
+        return None, None, None, None
+
+    # Encode categorical features
+    X = pd.get_dummies(X)
+
+    # Feature scaling
+    X = X.values.astype(np.float32)
+    X_mean = X.mean(axis=0)
+    X_std = X.std(axis=0) + 1e-8  # Avoid division by zero
+    X = (X - X_mean) / X_std
+
+    # Convert to PyTorch tensors
+    X = torch.tensor(X, dtype=torch.float32)
+
+    # Process target variable
+    if task_type == 'Classification':
+        # Encode target labels
+        if y.dtype == 'object':
+            y = pd.Categorical(y).codes
+        else:
+            y = y.astype(int)
+        y = torch.tensor(y.values, dtype=torch.long)
+    else:
+        y = y.values.reshape(-1, 1).astype(np.float32)
+        y = torch.tensor(y, dtype=torch.float32)
+
+    # Split the data
+    dataset = TensorDataset(X, y)
+    if len(dataset) < 2:
+        print("Error: The dataset is too small to split into training and testing sets.")
+        return None, None, None, None
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+
+    X_train, y_train = zip(*train_dataset)
+    X_train = torch.stack(X_train)
+    y_train = torch.stack(y_train)
+
+    X_test, y_test = zip(*test_dataset)
+    X_test = torch.stack(X_test)
+    y_test = torch.stack(y_test)
+
+    return X_train, y_train, X_test, y_test
+
+def prepare_cvae_data(data, input_columns, condition_columns):
+    try:
+        input_data = data[input_columns]
+        condition_data = data[condition_columns]
+    except KeyError as e:
+        print(f"Error: Column not found in the dataset: {e}")
+        return None, None, None, None, None, None
+
+    # Normalize input and condition data
+    from sklearn.preprocessing import StandardScaler
+
+    input_scaler = StandardScaler()
+    condition_scaler = StandardScaler()
+
+    input_data = input_scaler.fit_transform(input_data)
+    condition_data = condition_scaler.fit_transform(condition_data)
+
+    # Convert to numpy arrays
+    input_data = input_data.astype(np.float32)
+    condition_data = condition_data.astype(np.float32)
+
+    # Split data into train, validation, test sets
+    train_input, temp_input, train_condition, temp_condition = train_test_split(
+        input_data, condition_data, test_size=0.3, random_state=85, shuffle=True
+    )
+    val_input, test_input, val_condition, test_condition = train_test_split(
+        temp_input, temp_condition, test_size=0.5, random_state=42, shuffle=True
+    )
+
+    return train_input, val_input, test_input, train_condition, val_condition, test_condition
 
 if __name__ == '__main__':
     main()
