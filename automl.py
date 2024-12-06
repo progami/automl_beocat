@@ -20,12 +20,15 @@ from sklearn.preprocessing import StandardScaler
 def main():
     st.set_page_config(layout="wide")
     st.title("AutoML on Beocat")
-    total_resources_placeholder = st.empty()  # Placeholder for total resources
-    print("Starting AutoML on Beocat application...")  # Console output
 
-    # Initialize session state for resource menu visibility
+    # Initialize session state variables
     if 'show_resources' not in st.session_state:
         st.session_state['show_resources'] = True
+    if 'initialized' not in st.session_state:
+        st.session_state['initialized'] = True
+        print("Starting AutoML on Beocat application...")  # Console output
+
+    total_resources_placeholder = st.empty()  # Placeholder for total resources
 
     # Custom CSS for the sticky info box in the upper right corner
     st.markdown(
@@ -71,10 +74,15 @@ def main():
 
     uploaded_file = st.file_uploader("Upload a CSV file", type=['csv'])
     if uploaded_file is not None:
-        # User uploaded a file
-        data = pd.read_csv(uploaded_file)
+        # Use caching to prevent reloading the data
+        @st.cache_data
+        def load_data(uploaded_file):
+            data = pd.read_csv(uploaded_file)
+            print("Dataset loaded successfully.")  # Console output
+            return data
+
+        data = load_data(uploaded_file)
         st.success("Dataset uploaded successfully.")
-        print("Dataset uploaded successfully.")  # Console output
 
         # Model Selection
         st.header("Model Selection")
@@ -86,6 +94,8 @@ def main():
             st.error("The uploaded dataset does not contain any columns.")
             print("Error: The uploaded dataset does not contain any columns.")  # Console output
             return
+
+        inputs_valid = True  # Flag to check if all inputs are valid
 
         if selected_model == 'Standard Neural Network':
             col1, col2 = st.columns(2)
@@ -101,19 +111,19 @@ def main():
             )
             if not feature_columns:
                 st.error("Please select at least one feature column.")
-                return
+                inputs_valid = False
         elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
             st.write("Select input columns (to be reconstructed):")
             input_columns = st.multiselect("Input Columns:", columns)
             if not input_columns:
                 st.error("Please select at least one input column.")
-                return
+                inputs_valid = False
 
             st.write("Select condition columns (conditioning variables):")
             condition_columns = st.multiselect("Condition Columns:", columns)
             if not condition_columns:
                 st.error("Please select at least one condition column.")
-                return
+                inputs_valid = False
     else:
         st.warning("Please upload a dataset to proceed.")
         print("Awaiting dataset upload...")  # Console output
@@ -124,20 +134,24 @@ def main():
         st.header("Hyperparameter Settings")
         col1, col2, col3 = st.columns(3)
 
+        # Ensure inputs_valid is True before proceeding
+        if 'inputs_valid' not in locals():
+            inputs_valid = True
+
         with col1:
             st.markdown("**Batch Size**")
             batch_size_options = [16, 32, 64, 128, 256]
             batch_sizes = st.multiselect("Select Batch Sizes:", batch_size_options)
             if not batch_sizes:
                 st.error("Please select at least one batch size.")
-                return
+                inputs_valid = False
 
             st.markdown("**Learning Rate**")
             learning_rate_options = [0.0001, 0.001, 0.01, 0.1]
             learning_rates = st.multiselect("Select Learning Rates:", learning_rate_options)
             if not learning_rates:
                 st.error("Please select at least one learning rate.")
-                return
+                inputs_valid = False
 
         with col2:
             st.markdown("**Epochs**")
@@ -145,14 +159,14 @@ def main():
             epochs_list = st.multiselect("Select Number of Epochs:", epochs_options)
             if not epochs_list:
                 st.error("Please select at least one number of epochs.")
-                return
+                inputs_valid = False
 
             st.markdown("**Hidden Layer Size**")
             hidden_size_options = [32, 64, 128, 256]
             hidden_sizes = st.multiselect("Select Hidden Layer Sizes:", hidden_size_options)
             if not hidden_sizes:
                 st.error("Please select at least one hidden layer size.")
-                return
+                inputs_valid = False
 
         with col3:
             st.markdown("**Optimizers**")
@@ -160,74 +174,81 @@ def main():
             optimizers = st.multiselect("Select Optimizers:", optimizer_options)
             if not optimizers:
                 st.error("Please select at least one optimizer.")
-                return
+                inputs_valid = False
 
             st.markdown("**Loss Functions**")
-            if task_type == 'Regression':
+            if 'task_type' in locals() and task_type == 'Regression':
                 loss_function_options = ['MSELoss', 'L1Loss', 'SmoothL1Loss']
             else:
                 loss_function_options = ['CrossEntropyLoss', 'NLLLoss']
             loss_functions = st.multiselect("Select Loss Functions:", loss_function_options)
             if not loss_functions:
                 st.error("Please select at least one loss function.")
-                return
+                inputs_valid = False
 
-        # Hyperparameters dictionary
-        hyperparams = {
-            'learning_rate': learning_rates,
-            'batch_size': batch_sizes,
-            'epochs': epochs_list,
-            'hidden_size': hidden_sizes,
-            'optimizer': optimizers,
-            'loss_function': loss_functions
-        }
+        # Proceed only if inputs are valid
+        if inputs_valid:
+            # Hyperparameters dictionary
+            hyperparams = {
+                'learning_rate': learning_rates,
+                'batch_size': batch_sizes,
+                'epochs': epochs_list,
+                'hidden_size': hidden_sizes,
+                'optimizer': optimizers,
+                'loss_function': loss_functions
+            }
 
-        # Generate hyperparameter combinations
-        combinations = generate_hyperparameter_combinations(hyperparams)
-        num_combinations = len(combinations)
-        st.write(f"Total hyperparameter combinations: {num_combinations}")
+            # Generate hyperparameter combinations
+            combinations = generate_hyperparameter_combinations(hyperparams)
+            num_combinations = len(combinations)
+            st.write(f"Total hyperparameter combinations: {num_combinations}")
+        else:
+            st.warning("Please fill in all hyperparameter settings to proceed.")
 
     elif selected_model == 'Conditional Variational Autoencoder (CVAE)':
         st.header("Hyperparameter Settings for CVAE")
-
         col1, col2, col3 = st.columns(3)
+
+        # Ensure inputs_valid is True before proceeding
+        if 'inputs_valid' not in locals():
+            inputs_valid = True
 
         with col1:
             latent_dims = st.multiselect("Select Latent Dimensions:", [8, 16, 32, 64, 128])
             if not latent_dims:
                 st.error("Please select at least one latent dimension.")
-                return
+                inputs_valid = False
 
             epochs_list = st.multiselect("Select Number of Epochs:", [50, 100, 200, 300])
             if not epochs_list:
                 st.error("Please select at least one number of epochs.")
-                return
+                inputs_valid = False
 
             batch_sizes = st.multiselect("Select Batch Sizes:", [16, 32, 64, 128])
             if not batch_sizes:
                 st.error("Please select at least one batch size.")
-                return
+                inputs_valid = False
 
             learning_rates = st.multiselect("Select Learning Rates:", [0.01, 0.001, 0.0001])
             if not learning_rates:
                 st.error("Please select at least one learning rate.")
-                return
+                inputs_valid = False
 
         with col2:
             activation_functions = st.multiselect("Select Activation Functions:", ['Sigmoid', 'ReLU', 'Tanh', 'ELU'])
             if not activation_functions:
                 st.error("Please select at least one activation function.")
-                return
+                inputs_valid = False
 
             num_hidden_layers = st.multiselect("Select Number of Hidden Layers:", [1, 2, 3, 4])
             if not num_hidden_layers:
                 st.error("Please select at least one number of hidden layers.")
-                return
+                inputs_valid = False
 
             hidden_layer_sizes = st.multiselect("Select Hidden Layer Sizes:", [64, 128, 256])
             if not hidden_layer_sizes:
                 st.error("Please select at least one hidden layer size.")
-                return
+                inputs_valid = False
 
         with col3:
             use_l1 = st.checkbox("Use L1 Regularization")
@@ -235,7 +256,7 @@ def main():
                 l1_lambdas = st.multiselect("Select L1 Lambda Values:", [0.001, 0.01, 0.1])
                 if not l1_lambdas:
                     st.error("Please select at least one L1 lambda value.")
-                    return
+                    inputs_valid = False
             else:
                 l1_lambdas = [0.0]
 
@@ -244,7 +265,7 @@ def main():
                 l2_lambdas = st.multiselect("Select L2 Lambda Values:", [0.001, 0.01, 0.1])
                 if not l2_lambdas:
                     st.error("Please select at least one L2 lambda value.")
-                    return
+                    inputs_valid = False
             else:
                 l2_lambdas = [0.0]
 
@@ -252,33 +273,37 @@ def main():
             patience = 10
             min_delta = 1e-5
 
-        # Hyperparameters dictionary for CVAE
-        hyperparams = {
-            'LATENT_DIM': latent_dims,
-            'EPOCHS': epochs_list,
-            'BATCH_SIZE': batch_sizes,
-            'LEARNING_RATE': learning_rates,
-            'activation_name': activation_functions,
-            'num_hidden_layers': num_hidden_layers,
-            'hidden_layer_size': hidden_layer_sizes,
-            'use_l1': [use_l1],
-            'L1_LAMBDA': l1_lambdas,
-            'use_l2': [use_l2],
-            'L2_LAMBDA': l2_lambdas,
-            'PATIENCE': [patience],
-            'MIN_DELTA': [min_delta]
-        }
+        # Proceed only if inputs are valid
+        if inputs_valid:
+            # Hyperparameters dictionary for CVAE
+            hyperparams = {
+                'LATENT_DIM': latent_dims,
+                'EPOCHS': epochs_list,
+                'BATCH_SIZE': batch_sizes,
+                'LEARNING_RATE': learning_rates,
+                'activation_name': activation_functions,
+                'num_hidden_layers': num_hidden_layers,
+                'hidden_layer_size': hidden_layer_sizes,
+                'use_l1': [use_l1],
+                'L1_LAMBDA': l1_lambdas,
+                'use_l2': [use_l2],
+                'L2_LAMBDA': l2_lambdas,
+                'PATIENCE': [patience],
+                'MIN_DELTA': [min_delta]
+            }
 
-        # Generate hyperparameter combinations for CVAE
-        combinations = generate_hyperparameter_combinations_cvae(hyperparams)
-        num_combinations = len(combinations)
-        st.write(f"Total hyperparameter combinations: {num_combinations}")
+            # Generate hyperparameter combinations for CVAE
+            combinations = generate_hyperparameter_combinations_cvae(hyperparams)
+            num_combinations = len(combinations)
+            st.write(f"Total hyperparameter combinations: {num_combinations}")
+        else:
+            st.warning("Please fill in all hyperparameter settings to proceed.")
 
     # Display combinations if not too many
-    if num_combinations <= 100:
+    if inputs_valid and num_combinations <= 100:
         combination_df = pd.DataFrame(combinations)
         st.dataframe(combination_df)
-    else:
+    elif inputs_valid:
         st.warning("Too many combinations to display.")
 
     # Resource Specifications
@@ -342,7 +367,7 @@ def main():
 
     # Calculate total resources
     # First, ensure all necessary inputs are available
-    if time_limit_hours and memory_per_cpu and cpus_per_task and num_combinations:
+    if inputs_valid and time_limit_hours and memory_per_cpu and cpus_per_task and num_combinations:
         # Maximum Concurrent Resources
         max_cpus = max_concurrent_jobs * cpus_per_task
         max_memory_gb = max_concurrent_jobs * cpus_per_task * memory_per_cpu
@@ -386,7 +411,10 @@ def main():
 
     # Start training button
     if st.button("Start Training"):
-        # Removed the limit on maximum hyperparameter combinations
+        if not inputs_valid:
+            st.error("Please fill in all required fields before starting training.")
+            return
+
         st.info("Preparing data and submitting jobs to SLURM...")
         print("Preparing data and submitting jobs to SLURM...")  # Console output
 
@@ -511,9 +539,6 @@ def main():
                 st.error("Could not parse job ID from submission output.")
                 print("Error: Could not parse job ID from submission output.")
 
-    # Remove the "Collect Results" button and related code
-    # The leaderboard will be displayed automatically after jobs complete
-
 def create_main_job_dir():
     base_dir = "job_"
     existing_dirs = [d for d in os.listdir('.') if os.path.isdir(d) and d.startswith(base_dir)]
@@ -604,20 +629,19 @@ def monitor_job(job_id):
     import subprocess
     import time
 
-    while True:
-        result = subprocess.run(['squeue', '-j', str(job_id)], capture_output=True, text=True)
-        if str(job_id) in result.stdout:
-            print(f"Job {job_id} is still running...")  # Console output
-            time.sleep(30)  # Wait before checking again
+    result = subprocess.run(['squeue', '-j', str(job_id)], capture_output=True, text=True)
+    if str(job_id) in result.stdout:
+        print(f"Job {job_id} is still running...")  # Console output
+        return True  # Jobs are still running
+    else:
+        # Check if job completed or failed
+        sacct_result = subprocess.run(['sacct', '-j', str(job_id), '--format=State'], capture_output=True, text=True)
+        if 'COMPLETED' in sacct_result.stdout:
+            print(f"Job {job_id} completed successfully.")
+            return False  # Jobs have completed
         else:
-            # Check if job completed or failed
-            sacct_result = subprocess.run(['sacct', '-j', str(job_id), '--format=State'], capture_output=True, text=True)
-            if 'COMPLETED' in sacct_result.stdout:
-                print(f"Job {job_id} completed successfully.")
-                return False  # Jobs have completed
-            else:
-                print(f"Job {job_id} did not complete successfully.")
-                return False  # Jobs have completed (with errors)
+            print(f"Job {job_id} did not complete successfully.")
+            return False  # Jobs have completed (with errors)
     return False
 
 def display_leaderboard(results, selected_model):
@@ -728,8 +752,6 @@ def prepare_cvae_data(data, input_columns, condition_columns):
         return None, None, None, None, None, None
 
     # Normalize input and condition data
-    from sklearn.preprocessing import StandardScaler
-
     input_scaler = StandardScaler()
     condition_scaler = StandardScaler()
 
