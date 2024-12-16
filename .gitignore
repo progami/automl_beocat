@@ -8,4 +8,5 @@ run_*
 *.swp
 __pycache__/
 job_*
-datasets/Physics*
+datasets/
+.DS*

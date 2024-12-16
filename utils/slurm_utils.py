@@ -27,7 +27,7 @@ def generate_slurm_script(
     module_load_command = 'module load Python/3.10.4-GCCcore-11.3.0-bare'
     venv_activate_command = 'source /homes/jarrar/virtualenvs/automl_env/bin/activate'
 
-    # Changed so that we cd into main_job_dir to find params.json
+    # No arguments passed, rely on SLURM_ARRAY_TASK_ID inside training.py
     slurm_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --output={output_path}
@@ -47,7 +47,7 @@ echo "Starting task ${{SLURM_ARRAY_TASK_ID}}"
 
 TOTAL_TASKS={num_combinations}
 
-srun python {script_path} --task_id ${{SLURM_ARRAY_TASK_ID}} --total_tasks $TOTAL_TASKS --main_job_dir {main_job_dir}
+srun python {script_path}
 """
     return slurm_script
 
