@@ -19,8 +19,9 @@ def generate_slurm_script(
     array,
     num_combinations
 ):
+    # If no GPU type or 'Any GPU' is selected, just use generic GPU request
     if gpus > 0:
-        if gpu_type == "Any GPU":
+        if gpu_type == "Any GPU" or gpu_type is None:
             gpu_line = f'#SBATCH --gres=gpu:{gpus}'
         else:
             gpu_line = f'#SBATCH --gres=gpu:{gpu_type}:{gpus}'

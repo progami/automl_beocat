@@ -12,6 +12,7 @@ from utils.slurm_utils import generate_slurm_script, parse_job_id
 from datetime import datetime
 from itertools import product
 
+# Ensure keys are always defined
 if "job_running" not in st.session_state:
     st.session_state["job_running"] = False
 if "current_job_id" not in st.session_state:
@@ -43,7 +44,7 @@ def main():
     st.set_page_config(page_title="AutoBeocat: Automated ML on HPC", layout="wide")
     st.title("AutoBeocat: Automated ML on Beocat")
 
-    disabled = st.session_state["job_running"]
+    disabled = st.session_state.get("job_running", False)
 
     tab_train_script, tab_dataset, tab_hparams, tab_resources, tab_run = st.tabs([
         "Upload Training Script", "Dataset Selection", "Hyperparameters", "Resource Specifications", "Run"
@@ -168,7 +169,7 @@ def main():
 
         max_concurrent_jobs = st.number_input("Max Concurrent Jobs:", min_value=1, max_value=10, value=2, disabled=disabled)
 
-        local_test = st.checkbox("Local Test Run (no Slurm, 1 combo, 1 epoch, 1 batch)", disabled=st.session_state["job_running"])
+        local_test = st.checkbox("Local Test Run (no Slurm, 1 combo, 1 epoch, 1 batch)", disabled=disabled)
         if local_test:
             st.info("Local test run will run only the first combination for 1 epoch and break after 1 batch.")
 
@@ -198,7 +199,7 @@ def main():
         st.sidebar.dataframe(combos_df)
 
     with tab_run:
-        start_button = st.button("Start Training", disabled=st.session_state["job_running"])
+        start_button = st.button("Start Training", disabled=st.session_state.get("job_running", False))
         if start_button:
             if num_combinations == 0:
                 st.error("No combinations chosen!")
@@ -253,6 +254,7 @@ def main():
                 training_script_path = os.path.join(main_job_dir, "training.py")
 
                 array_str = f"0-{num_combinations-1}%{max_concurrent_jobs}"
+                chosen_gpu_type = gpu_type if use_gpu else None
                 slurm_script_content = generate_slurm_script(
                     job_name=f'autobeocat_job_array_{main_job_dir}',
                     script_path=training_script_path,
@@ -264,7 +266,7 @@ def main():
                     job_dir=os.path.abspath(job_dir),
                     main_job_dir=os.path.abspath(main_job_dir),
                     gpus=gpus,
-                    gpu_type=gpu_type if gpu_type is not None else "Any GPU",
+                    gpu_type=chosen_gpu_type if chosen_gpu_type is not None else "Any GPU",
                     array=array_str,
                     num_combinations=num_combinations
                 )
@@ -297,10 +299,10 @@ def main():
                         my_bar = st.progress(0)
                         prev_msg = ""
 
-                        cancel_button = st.button("Cancel Job", disabled=(not st.session_state["job_running"] or st.session_state["current_job_id"] is None))
-                        while True:
+                        cancel_button = st.button("Cancel Job", disabled=(not st.session_state.get("job_running", False) or st.session_state.get("current_job_id") is None))
+                        while st.session_state.get("job_running", False):
                             # Check if user canceled the job
-                            if cancel_button and st.session_state["current_job_id"] is not None:
+                            if cancel_button and st.session_state.get("current_job_id") is not None:
                                 cancel_cmd = ['scancel', st.session_state["current_job_id"]]
                                 cancel_result = subprocess.run(cancel_cmd, capture_output=True, text=True)
                                 if cancel_result.returncode == 0:
