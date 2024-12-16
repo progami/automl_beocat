@@ -1,12 +1,11 @@
+import streamlit as st
 import os
 import pandas as pd
 import pickle
 import subprocess
 import time
 import json
-import streamlit as st
 import torch
-from itertools import product
 from sklearn.model_selection import train_test_split
 from utils.data_utils import prepare_cvae_data
 from utils.slurm_utils import generate_slurm_script, parse_job_id
@@ -39,10 +38,11 @@ def display_leaderboard(results):
 
 def main():
     st.set_page_config(page_title="AutoBeocat: Automated ML on HPC", layout="wide")
-    st.title("AutoBeocat: Automated ML on HPC (No Trials, Just Grid)")
+    st.title("AutoBeocat: Automated ML on Beocat")
 
     disabled = st.session_state["job_running"]
 
+    # Tabs for better UI organization
     tab_train_script, tab_dataset, tab_hparams, tab_resources, tab_run = st.tabs([
         "Upload Training Script", "Dataset Selection", "Hyperparameters", "Resource Specifications", "Run"
     ])
@@ -70,7 +70,7 @@ def main():
         data = load_data(uploaded_file)
         st.success("Dataset uploaded successfully.")
 
-        st.write("Select columns for input (e.g. positions) and condition (e.g. momenta) features:")
+        st.write("Select columns for input and condition features:")
         columns = data.columns.tolist()
         if not columns:
             st.error("No columns in dataset.")
@@ -143,13 +143,22 @@ def main():
 
         col4, col5 = st.columns(2)
         with col4:
-            st.write("All chosen combinations will be tested in HPC mode using a SLURM job array.")
+            st.write("All chosen combinations will be tested on HPC.")
 
         with col5:
             use_gpu = st.checkbox("Use GPU for Training", value=False, disabled=disabled)
             if use_gpu:
                 gpus = st.number_input("Number of GPUs:", min_value=1, max_value=8, value=1, disabled=disabled)
-                gpu_types = ['geforce_rtx_2080_ti', 'geforce_rtx_3090']
+                gpu_types = [
+                    'geforce_gtx_1080_ti',
+                    'geforce_rtx_2080_ti',
+                    'geforce_rtx_3090',
+                    'l40s',
+                    'quadro_gp100',
+                    'rtx_a4000',
+                    'rtx_a4500',
+                    'rtx_a6000'
+                ]
                 gpu_type = st.selectbox("GPU Type:", gpu_types, disabled=disabled)
             else:
                 gpus = 0
@@ -157,11 +166,12 @@ def main():
 
         max_concurrent_jobs = st.number_input("Max Concurrent Jobs:", min_value=1, max_value=10, value=2, disabled=disabled)
 
-        local_test = st.checkbox("Local Test Run (no Slurm, run just first combo, 1 epoch, 1 batch)", disabled=st.session_state["job_running"])
+        local_test = st.checkbox("Local Test Run (no Slurm, 1 combo, 1 epoch, 1 batch)", disabled=st.session_state["job_running"])
         if local_test:
-            st.info("Local test run will run only the first combination with minimal steps.")
+            st.info("Local test run will run only the first combination for 1 epoch and break after 1 batch.")
 
     combos = []
+    from itertools import product
     for ld, ep, bs, lr_val, act, layers in product(
         latent_dims_set, epoch_choices, batch_sizes_cvae, cvae_lr_set, activations, nhl
     ):
@@ -197,6 +207,7 @@ def main():
 
             main_job_dir = create_main_job_dir()
 
+            # Save training.py
             with open(os.path.join(main_job_dir, "training.py"), "wb") as f:
                 f.write(training_file.getvalue())
 
@@ -222,33 +233,24 @@ def main():
             with open(os.path.join(main_job_dir, 'params.json'), 'w') as f:
                 json.dump(params_dict, f)
 
-            # Create an empty results.csv with header
-            results_path = os.path.join(main_job_dir, 'results.csv')
-            if not os.path.exists(results_path):
-                with open(results_path, 'w') as rf:
-                    rf.write("ComboIndex,LatentDim,Epochs,BatchSize,LR,Activation,NumHiddenLayers,Hsizes,MSE_WEIGHT,KLD_WEIGHT,MRE2_WEIGHT,ENERGY_DIFF_WEIGHT,MRE,MSE,EnergyDiff,Runtime\n")
-
             if local_test:
-                # Local test run: just run `training.py` once
+                # Local test run: just run training.py once locally
                 os.chdir(main_job_dir)
-                st.info("Running a single local test run (1 combo, minimal steps)...")
+                st.info("Running a single local test run (1 combo, 1 epoch, 1 batch)...")
                 result = subprocess.run(['python', 'training.py'], capture_output=True, text=True)
                 st.text(result.stdout)
                 if result.returncode != 0:
                     st.error(f"Local run failed: {result.stderr}")
                 else:
                     st.success("Local test run completed.")
-                    # Display results if any
-                    if os.path.exists('results.csv'):
-                        res_df = pd.read_csv('results.csv')
-                        display_leaderboard(res_df)
                 st.session_state["job_running"] = False
             else:
-                # HPC mode: create SLURM script for job array
+                # Normal Slurm submission:
                 job_dir = os.path.join(main_job_dir, 'jobs')
                 os.makedirs(job_dir, exist_ok=True)
                 training_script_path = os.path.join(main_job_dir, "training.py")
 
+                array_str = f"0-{num_combinations-1}%{max_concurrent_jobs}"
                 slurm_script_content = generate_slurm_script(
                     job_name=f'autobeocat_job_array_{main_job_dir}',
                     script_path=training_script_path,
@@ -261,7 +263,7 @@ def main():
                     main_job_dir=os.path.abspath(main_job_dir),
                     gpus=gpus,
                     gpu_type=gpu_type,
-                    array=f"0-{num_combinations-1}%{max_concurrent_jobs}",
+                    array=array_str,
                     num_combinations=num_combinations
                 )
 
@@ -292,11 +294,12 @@ def main():
                         my_bar = st.progress(0)
                         prev_msg = ""
                         while True:
+                            results_path = os.path.join(main_job_dir, 'results.csv')
                             if os.path.exists(results_path):
                                 results_df = pd.read_csv(results_path)
                                 completed_jobs = len(results_df)
                                 if completed_jobs == num_combinations:
-                                    st.success("All combinations have completed.")
+                                    st.success("All jobs have completed.")
                                     display_leaderboard(results_df)
                                     my_bar.progress(100)
                                     break
