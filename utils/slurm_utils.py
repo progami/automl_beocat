@@ -19,15 +19,18 @@ def generate_slurm_script(
     array,
     num_combinations
 ):
-    gpu_line = ''
     if gpus > 0:
-        gpu_line = f'#SBATCH --gres=gpu:{gpu_type}:{gpus}'
+        if gpu_type == "Any GPU":
+            gpu_line = f'#SBATCH --gres=gpu:{gpus}'
+        else:
+            gpu_line = f'#SBATCH --gres=gpu:{gpu_type}:{gpus}'
+    else:
+        gpu_line = ''
 
     script_path = os.path.abspath(script_path)
     module_load_command = 'module load Python/3.10.4-GCCcore-11.3.0-bare'
     venv_activate_command = 'source /homes/jarrar/virtualenvs/automl_env/bin/activate'
 
-    # No arguments passed, rely on SLURM_ARRAY_TASK_ID inside training.py
     slurm_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --output={output_path}

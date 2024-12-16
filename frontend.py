@@ -45,7 +45,6 @@ def main():
 
     disabled = st.session_state["job_running"]
 
-    # Tabs for better UI organization
     tab_train_script, tab_dataset, tab_hparams, tab_resources, tab_run = st.tabs([
         "Upload Training Script", "Dataset Selection", "Hyperparameters", "Resource Specifications", "Run"
     ])
@@ -64,7 +63,6 @@ def main():
             st.warning("Please upload a dataset.")
             return
 
-        @st.cache_data
         def load_data(uploaded_file):
             data = pd.read_csv(uploaded_file)
             print_with_time("Dataset loaded successfully.")
@@ -153,6 +151,7 @@ def main():
             if use_gpu:
                 gpus = st.number_input("Number of GPUs:", min_value=1, max_value=8, value=1, disabled=disabled)
                 gpu_types = [
+                    'Any GPU',
                     'geforce_gtx_1080_ti',
                     'geforce_rtx_2080_ti',
                     'geforce_rtx_3090',
@@ -265,7 +264,7 @@ def main():
                     job_dir=os.path.abspath(job_dir),
                     main_job_dir=os.path.abspath(main_job_dir),
                     gpus=gpus,
-                    gpu_type=gpu_type,
+                    gpu_type=gpu_type if gpu_type is not None else "Any GPU",
                     array=array_str,
                     num_combinations=num_combinations
                 )
@@ -297,9 +296,8 @@ def main():
 
                         my_bar = st.progress(0)
                         prev_msg = ""
-                        # Add a Cancel Job button if job is running
-                        cancel_button = st.button("Cancel Job", disabled=(not st.session_state["job_running"] or st.session_state["current_job_id"] is None))
 
+                        cancel_button = st.button("Cancel Job", disabled=(not st.session_state["job_running"] or st.session_state["current_job_id"] is None))
                         while True:
                             # Check if user canceled the job
                             if cancel_button and st.session_state["current_job_id"] is not None:
