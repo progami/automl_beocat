@@ -10,9 +10,12 @@ from sklearn.model_selection import train_test_split
 from utils.data_utils import prepare_cvae_data
 from utils.slurm_utils import generate_slurm_script, parse_job_id
 from datetime import datetime
+from itertools import product
 
 if "job_running" not in st.session_state:
     st.session_state["job_running"] = False
+if "current_job_id" not in st.session_state:
+    st.session_state["current_job_id"] = None
 
 def print_with_time(message: str):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -171,7 +174,6 @@ def main():
             st.info("Local test run will run only the first combination for 1 epoch and break after 1 batch.")
 
     combos = []
-    from itertools import product
     for ld, ep, bs, lr_val, act, layers in product(
         latent_dims_set, epoch_choices, batch_sizes_cvae, cvae_lr_set, activations, nhl
     ):
@@ -204,6 +206,7 @@ def main():
                 return
 
             st.session_state["job_running"] = True
+            st.session_state["current_job_id"] = None
 
             main_job_dir = create_main_job_dir()
 
@@ -284,6 +287,7 @@ def main():
                     if job_id:
                         st.success(f"Job array submitted successfully. Job ID: {job_id}")
                         print_with_time(f"Job array submitted successfully. Job ID: {job_id}")
+                        st.session_state["current_job_id"] = job_id
 
                         st.info(f"Jobs submitted with Job ID: {job_id}.")
                         st.write("Monitor with:")
@@ -293,7 +297,23 @@ def main():
 
                         my_bar = st.progress(0)
                         prev_msg = ""
+                        # Add a Cancel Job button if job is running
+                        cancel_button = st.button("Cancel Job", disabled=(not st.session_state["job_running"] or st.session_state["current_job_id"] is None))
+
                         while True:
+                            # Check if user canceled the job
+                            if cancel_button and st.session_state["current_job_id"] is not None:
+                                cancel_cmd = ['scancel', st.session_state["current_job_id"]]
+                                cancel_result = subprocess.run(cancel_cmd, capture_output=True, text=True)
+                                if cancel_result.returncode == 0:
+                                    st.warning("Job cancelled successfully.")
+                                    print_with_time(f"Job {st.session_state['current_job_id']} cancelled by user.")
+                                    st.session_state["job_running"] = False
+                                    st.session_state["current_job_id"] = None
+                                    break
+                                else:
+                                    st.error(f"Failed to cancel job: {cancel_result.stderr}")
+
                             results_path = os.path.join(main_job_dir, 'results.csv')
                             if os.path.exists(results_path):
                                 results_df = pd.read_csv(results_path)
@@ -302,6 +322,8 @@ def main():
                                     st.success("All jobs have completed.")
                                     display_leaderboard(results_df)
                                     my_bar.progress(100)
+                                    st.session_state["job_running"] = False
+                                    st.session_state["current_job_id"] = None
                                     break
                                 else:
                                     completion_ratio = int((completed_jobs / num_combinations) * 100)
