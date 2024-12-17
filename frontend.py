@@ -52,9 +52,7 @@ def main():
         "Upload Training Script", "Dataset Selection", "Hyperparameters", "Resource Specifications", "Run"
     ])
 
-    # ----------------------------
     # TRAINING SCRIPT TAB
-    # ----------------------------
     with tab_train_script:
         st.header("Upload Training Script")
         training_file = st.file_uploader("Upload training.py", type=["py"], disabled=disabled)
@@ -62,15 +60,12 @@ def main():
             st.warning("Please upload your training.py file.")
             return
 
-    # ----------------------------
     # DATASET TAB
-    # ----------------------------
     with tab_dataset:
         st.header("Dataset Selection")
         uploaded_file = st.file_uploader("Upload a CSV dataset", type=['csv'], disabled=disabled)
 
         if uploaded_file is not None and st.session_state["uploaded_data"] is None:
-            # Load data once into session state
             data = pd.read_csv(uploaded_file)
             st.session_state["uploaded_data"] = data
             print_with_time("Dataset loaded successfully.")
@@ -97,9 +92,7 @@ def main():
             st.error("At least one condition column required.")
             return
 
-    # ----------------------------
     # HYPERPARAMETERS TAB
-    # ----------------------------
     with tab_hparams:
         st.subheader("Hyperparameters for Grid Search")
 
@@ -146,9 +139,7 @@ def main():
 
         st.write("Early stopping with patience=5 and min_delta=0.01 is used internally.")
 
-    # ----------------------------
     # RESOURCES TAB
-    # ----------------------------
     with tab_resources:
         st.header("Resource Specifications")
 
@@ -163,7 +154,7 @@ def main():
 
         st.divider()
 
-        # GPU Resources in an expander
+        # GPU Resources
         use_gpu_expander = st.expander("GPU Resources (Optional)")
         with use_gpu_expander:
             use_gpu = st.checkbox("Use GPU for Training", value=False, disabled=disabled)
@@ -201,9 +192,6 @@ def main():
 
         st.write("All chosen combinations will be tested on HPC.")
 
-    # ----------------------------
-    # RUN TAB
-    # ----------------------------
     combos = []
     for ld, ep, bs, lr_val, act, layers in product(
         latent_dims_set, epoch_choices, batch_sizes_cvae, cvae_lr_set, activations, nhl
@@ -270,7 +258,7 @@ def main():
                 json.dump(params_dict, f)
 
             if local_test:
-                # Local test run: just run training.py once locally
+                # Local test run
                 os.chdir(main_job_dir)
                 st.info("Running a single local test run (1 combo, 1 epoch, 1 batch)...")
                 result = subprocess.run(['python', 'training.py'], capture_output=True, text=True)
@@ -281,13 +269,13 @@ def main():
                     st.success("Local test run completed.")
                 st.session_state["job_running"] = False
             else:
-                # Normal Slurm submission:
+                # HPC mode
                 job_dir = os.path.join(main_job_dir, 'jobs')
                 os.makedirs(job_dir, exist_ok=True)
                 training_script_path = os.path.join(main_job_dir, "training.py")
 
                 array_str = f"0-{num_combinations-1}%{max_concurrent_jobs}"
-                chosen_gpu_type = gpu_type if use_gpu else None
+                chosen_gpu_type = gpu_type if use_gpu else "Any GPU"
                 slurm_script_content = generate_slurm_script(
                     job_name=f'autobeocat_job_array_{main_job_dir}',
                     script_path=training_script_path,
@@ -299,7 +287,7 @@ def main():
                     job_dir=os.path.abspath(job_dir),
                     main_job_dir=os.path.abspath(main_job_dir),
                     gpus=gpus,
-                    gpu_type=chosen_gpu_type if chosen_gpu_type is not None else "Any GPU",
+                    gpu_type=chosen_gpu_type,
                     array=array_str,
                     num_combinations=num_combinations
                 )
@@ -330,10 +318,14 @@ def main():
                         st.info("Waiting for jobs to complete...")
 
                         my_bar = st.progress(0)
-                        status_placeholder = st.empty()  # Single status line
+                        status_placeholder = st.empty()
                         cancel_button = st.button("Cancel Job", disabled=(not st.session_state.get("job_running", False) or st.session_state.get("current_job_id") is None))
                         
                         start_time = time.time()
+                        previous_completed = 0
+                        no_progress_max_time = 600  # 10 mins timeout
+                        no_progress_elapsed = 0
+                        check_interval = 10
 
                         while st.session_state.get("job_running", False):
                             # Check if user canceled the job
@@ -353,7 +345,12 @@ def main():
                             if os.path.exists(results_path):
                                 results_df = pd.read_csv(results_path)
                                 completed_jobs = len(results_df)
+
+                                # Debug prints:
+                                st.write(f"DEBUG: completed_jobs={completed_jobs}, num_combinations={num_combinations}")
+
                                 if completed_jobs == num_combinations:
+                                    st.write("DEBUG: All combinations completed.")
                                     st.success("All jobs have completed.")
                                     display_leaderboard(results_df)
                                     my_bar.progress(100)
@@ -367,11 +364,28 @@ def main():
                                     msg = f"{completed_jobs}/{num_combinations} done. Avg time/job: {avg_time_per_job:.2f}s"
                                     status_placeholder.info(msg)
                                     print_with_time(msg)
+
+                                    # Check for progress
+                                    if completed_jobs > previous_completed:
+                                        previous_completed = completed_jobs
+                                        no_progress_elapsed = 0
+                                    else:
+                                        no_progress_elapsed += check_interval
+
+                                    # If no progress for too long, stop waiting
+                                    if no_progress_elapsed > no_progress_max_time:
+                                        st.warning("No progress in results for a long time. Possibly some tasks failed.")
+                                        st.info("Showing partial results.")
+                                        display_leaderboard(results_df)
+                                        st.session_state["job_running"] = False
+                                        st.session_state["current_job_id"] = None
+                                        break
                             else:
                                 msg = "Results file not found yet, waiting..."
                                 status_placeholder.info(msg)
                                 print_with_time(msg)
-                            time.sleep(10)
+
+                            time.sleep(check_interval)
 
 if __name__ == '__main__':
     main()
