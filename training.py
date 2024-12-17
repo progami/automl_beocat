@@ -399,6 +399,7 @@ with torch.no_grad():
     positions_test_tensor = test_input_tensor.to(device)
     momenta_test_tensor = test_condition_tensor.to(device)
 
+    # Use the last combo's LATENT_DIM for decoding test set
     z = torch.randn(len(test_dataset), LATENT_DIM, device=device)*std_train+mu_train_mean
     y_test_tensor = momenta_test_tensor
 
@@ -437,15 +438,17 @@ with torch.no_grad():
     print(f'Average MSE: {MSE:.6f}')
     print(f'Average Energy Difference: {EnergyDiff_mean:.6e}')
 
-    with open(os.path.join(main_job_dir,'metrics.txt'),'w') as f:
-        f.write(f'Average MRE: {MRE:.4f}%\n')
-        f.write(f'Average MSE: {MSE:.6f}\n')
-        f.write(f'Average Energy Difference: {EnergyDiff_mean:.6e}\n')
-
     comboIndex = combos.index[0]
     hs_str = json.dumps(HIDDEN_DIMS)
     runtime = end_time - start_time
-    # Quote every field to avoid parsing issues
+
+    # Prepare header and line for results.csv
+    headers = [
+        "TaskID","latent_dim","epochs","batch_size","lr","activation","num_hidden_layers","hidden_layer_sizes",
+        "MSE_WEIGHT","KLD_WEIGHT","MRE2_WEIGHT","ENERGY_DIFF_WEIGHT",
+        "MRE","MSE","EnergyDiff","runtime_seconds"
+    ]
+    header_line = ",".join(headers) + "\n"
     line = (
         f"\"{comboIndex}\",\"{combo['latent_dim']}\",\"{combo['epochs']}\",\"{combo['batch_size']}\","
         f"\"{combo['lr']}\",\"{combo['activation']}\",\"{combo['num_hidden_layers']}\",\"{hs_str}\","
@@ -456,6 +459,9 @@ with torch.no_grad():
     results_path = os.path.join(main_job_dir,'results.csv')
     with open(results_path,'a') as rf:
         fcntl.flock(rf, fcntl.LOCK_EX)
+        # Check if file is empty (no header)
+        if os.stat(results_path).st_size == 0:
+            rf.write(header_line)
         rf.write(line)
         fcntl.flock(rf, fcntl.LOCK_UN)
 
