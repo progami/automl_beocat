@@ -5,17 +5,13 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+from torch.utils.data import TensorDataset, DataLoader
 from torch.optim import Adam
-from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 import time
 import sys
 import json
 import pickle
 import fcntl  # for file locking
-import math
 
 def set_seed(seed=0):
     torch.manual_seed(seed)
@@ -238,8 +234,7 @@ for combo_index, combo in combos.iterrows():
         epoch_train_kld_sum = 0.0
 
         samples_this_epoch = 0
-        progress_bar = tqdm(train_loader, desc=f"Combo {combo_index}/{len(combos)} - Epoch {epoch+1}/{EPOCHS}")
-
+        progress_bar = train_loader
         for i, (x, y) in enumerate(progress_bar):
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
@@ -260,8 +255,7 @@ for combo_index, combo in combos.iterrows():
                           MRE2_WEIGHT*mre2_loss +
                           ENERGY_DIFF_WEIGHT*EnergyLoss)
 
-            loss = unreg_loss
-            loss.backward()
+            unreg_loss.backward()
             optimizer.step()
 
             bsz = x.size(0)
@@ -280,14 +274,6 @@ for combo_index, combo in combos.iterrows():
             epoch_train_kld_sum += kld_loss.item()*bsz
             epoch_train_mre_sum += mre2_loss.item()*bsz
             epoch_train_energy_diff_sum += EnergyLoss.item()*bsz
-
-            progress_bar.set_postfix({
-                'Total Loss': f"{(total_unreg_loss/samples_this_epoch):.4f}",
-                'Recon Loss': f"{(total_recon_loss_sum/samples_this_epoch):.4f}",
-                'KLD Loss': f"{(total_kld_loss_sum/samples_this_epoch):.4f}",
-                'MRE2 Loss': f"{(total_mre2_loss_sum/samples_this_epoch):.4f}",
-                'Energy Loss': f"{(total_energy_loss_sum/samples_this_epoch):.4f}"
-            })
 
             if local_test:
                 # break after one batch in local test
@@ -367,7 +353,7 @@ for combo_index, combo in combos.iterrows():
 end_time = time.time()
 mu_train_mean = mu_sum/total_samples
 var_train = (mu_square_sum/total_samples)-mu_train_mean**2
-std_train = torch.sqrt(var_train+epsilon)
+std_train = torch.sqrt(var_train+1e-10)
 
 torch.save({
     'mu_train_mean': mu_train_mean.cpu(),
@@ -399,7 +385,7 @@ with torch.no_grad():
     positions_test_tensor = test_input_tensor.to(device)
     momenta_test_tensor = test_condition_tensor.to(device)
 
-    # Use the last combo's LATENT_DIM for decoding test set
+    LATENT_DIM = combos.iloc[0]['latent_dim']
     z = torch.randn(len(test_dataset), LATENT_DIM, device=device)*std_train+mu_train_mean
     y_test_tensor = momenta_test_tensor
 
@@ -409,7 +395,7 @@ with torch.no_grad():
 
     x_test_np = (positions_test_tensor*scale_pos+mean_pos).cpu().numpy()
 
-    MRE = np.mean(np.abs(x_test_np - x_pred)/(np.abs(x_test_np)+epsilon))*100
+    MRE = np.mean(np.abs(x_test_np - x_pred)/(np.abs(x_test_np)+1e-10))*100
     MSE = np.mean((x_test_np - x_pred)**2)
     momenta_np = (momenta_test_tensor*scale_mom+mean_mom).cpu().numpy()
 
@@ -426,29 +412,31 @@ with torch.no_grad():
     positions_O_pred = x_pred[:,3:6]
     positions_S_pred = x_pred[:,6:9]
 
-    rCO_pred = np.maximum(np.linalg.norm(positions_C_pred - positions_O_pred,axis=1),epsilon)
-    rCS_pred = np.maximum(np.linalg.norm(positions_C_pred - positions_S_pred,axis=1),epsilon)
-    rOS_pred = np.maximum(np.linalg.norm(positions_O_pred - positions_S_pred,axis=1),epsilon)
+    rCO_pred = np.maximum(np.linalg.norm(positions_C_pred - positions_O_pred,axis=1),1e-10)
+    rCS_pred = np.maximum(np.linalg.norm(positions_C_pred - positions_S_pred,axis=1),1e-10)
+    rOS_pred = np.maximum(np.linalg.norm(positions_O_pred - positions_S_pred,axis=1),1e-10)
 
     PE_pred = (4/rCO_pred)+(4/rCS_pred)+(4/rOS_pred)
-    EnergyDiff = ((KE_total - PE_pred)/(np.abs(KE_total)+epsilon))**2
+    EnergyDiff = ((KE_total - PE_pred)/(np.abs(KE_total)+1e-10))**2
     EnergyDiff_mean = np.mean(EnergyDiff)
 
     print(f'Average MRE: {MRE:.4f}%')
     print(f'Average MSE: {MSE:.6f}')
     print(f'Average Energy Difference: {EnergyDiff_mean:.6e}')
 
+    with open(os.path.join(main_job_dir,'metrics.txt'),'w') as f:
+        f.write(f'Average MRE: {MRE:.4f}%\n')
+        f.write(f'Average MSE: {MSE:.6f}\n')
+        f.write(f'Average Energy Difference: {EnergyDiff_mean:.6e}\n')
+
     comboIndex = combos.index[0]
-    hs_str = json.dumps(HIDDEN_DIMS)
+    hs_str = json.dumps(combo['hidden_layer_sizes'])
     runtime = end_time - start_time
 
-    # Prepare header and line for results.csv
-    headers = [
-        "TaskID","latent_dim","epochs","batch_size","lr","activation","num_hidden_layers","hidden_layer_sizes",
-        "MSE_WEIGHT","KLD_WEIGHT","MRE2_WEIGHT","ENERGY_DIFF_WEIGHT",
-        "MRE","MSE","EnergyDiff","runtime_seconds"
-    ]
-    header_line = ",".join(headers) + "\n"
+    results_path = os.path.join(main_job_dir,'results.csv')
+    header = ("comboIndex,latent_dim,epochs,batch_size,lr,activation,num_hidden_layers,hidden_layer_sizes,"
+              "MSE_WEIGHT,KLD_WEIGHT,MRE2_WEIGHT,ENERGY_DIFF_WEIGHT,MRE,MSE,EnergyDiff,runtime\n")
+
     line = (
         f"\"{comboIndex}\",\"{combo['latent_dim']}\",\"{combo['epochs']}\",\"{combo['batch_size']}\","
         f"\"{combo['lr']}\",\"{combo['activation']}\",\"{combo['num_hidden_layers']}\",\"{hs_str}\","
@@ -456,12 +444,11 @@ with torch.no_grad():
         f"\"{MRE:.4f}\",\"{MSE:.6f}\",\"{EnergyDiff_mean:.6e}\",\"{runtime:.4f}\"\n"
     )
 
-    results_path = os.path.join(main_job_dir,'results.csv')
+    # Write to results.csv with a header if the file doesn't exist
     with open(results_path,'a') as rf:
         fcntl.flock(rf, fcntl.LOCK_EX)
-        # Check if file is empty (no header)
-        if os.stat(results_path).st_size == 0:
-            rf.write(header_line)
+        if os.path.getsize(results_path) == 0:
+            rf.write(header)
         rf.write(line)
         fcntl.flock(rf, fcntl.LOCK_UN)
 
