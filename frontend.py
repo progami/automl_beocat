@@ -17,6 +17,8 @@ if "job_running" not in st.session_state:
     st.session_state["job_running"] = False
 if "current_job_id" not in st.session_state:
     st.session_state["current_job_id"] = None
+if "uploaded_data" not in st.session_state:
+    st.session_state["uploaded_data"] = None  # Will store the loaded dataset
 
 def print_with_time(message: str):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -50,6 +52,9 @@ def main():
         "Upload Training Script", "Dataset Selection", "Hyperparameters", "Resource Specifications", "Run"
     ])
 
+    # ----------------------------
+    # TRAINING SCRIPT TAB
+    # ----------------------------
     with tab_train_script:
         st.header("Upload Training Script")
         training_file = st.file_uploader("Upload training.py", type=["py"], disabled=disabled)
@@ -57,22 +62,26 @@ def main():
             st.warning("Please upload your training.py file.")
             return
 
+    # ----------------------------
+    # DATASET TAB
+    # ----------------------------
     with tab_dataset:
         st.header("Dataset Selection")
         uploaded_file = st.file_uploader("Upload a CSV dataset", type=['csv'], disabled=disabled)
-        if uploaded_file is None:
+
+        if uploaded_file is not None and st.session_state["uploaded_data"] is None:
+            # Load data once into session state
+            data = pd.read_csv(uploaded_file)
+            st.session_state["uploaded_data"] = data
+            print_with_time("Dataset loaded successfully.")
+            st.success("Dataset uploaded successfully.")
+
+        if st.session_state["uploaded_data"] is None:
             st.warning("Please upload a dataset.")
             return
+        else:
+            data = st.session_state["uploaded_data"]
 
-        def load_data(uploaded_file):
-            data = pd.read_csv(uploaded_file)
-            print_with_time("Dataset loaded successfully.")
-            return data
-
-        data = load_data(uploaded_file)
-        st.success("Dataset uploaded successfully.")
-
-        st.write("Select columns for input and condition features:")
         columns = data.columns.tolist()
         if not columns:
             st.error("No columns in dataset.")
@@ -88,8 +97,12 @@ def main():
             st.error("At least one condition column required.")
             return
 
+    # ----------------------------
+    # HYPERPARAMETERS TAB
+    # ----------------------------
     with tab_hparams:
         st.subheader("Hyperparameters for Grid Search")
+
         latent_dims_set = st.multiselect("Latent dimensions:", [8,16,32,64,128], default=[32], disabled=disabled)
         if not latent_dims_set:
             st.error("At least one latent dimension required.")
@@ -133,9 +146,14 @@ def main():
 
         st.write("Early stopping with patience=5 and min_delta=0.01 is used internally.")
 
+    # ----------------------------
+    # RESOURCES TAB
+    # ----------------------------
     with tab_resources:
         st.header("Resource Specifications")
-        col1, col2, col3 = st.columns(3)
+
+        st.subheader("Basic HPC Resources")
+        col1, col2, col3 = st.columns([1,1,1])
         with col1:
             time_limit_hours = st.number_input("Time Limit (Hours):", min_value=1, max_value=168, value=1, disabled=disabled)
         with col2:
@@ -143,36 +161,49 @@ def main():
         with col3:
             cpus_per_task = st.number_input("CPUs per Task:", min_value=1, max_value=32, value=1, disabled=disabled)
 
-        col4, col5 = st.columns(2)
-        with col4:
-            st.write("All chosen combinations will be tested on HPC.")
+        st.divider()
 
-        with col5:
+        # GPU Resources in an expander
+        use_gpu_expander = st.expander("GPU Resources (Optional)")
+        with use_gpu_expander:
             use_gpu = st.checkbox("Use GPU for Training", value=False, disabled=disabled)
             if use_gpu:
-                gpus = st.number_input("Number of GPUs:", min_value=1, max_value=8, value=1, disabled=disabled)
-                gpu_types = [
-                    'Any GPU',
-                    'geforce_gtx_1080_ti',
-                    'geforce_rtx_2080_ti',
-                    'geforce_rtx_3090',
-                    'l40s',
-                    'quadro_gp100',
-                    'rtx_a4000',
-                    'rtx_a4500',
-                    'rtx_a6000'
-                ]
-                gpu_type = st.selectbox("GPU Type:", gpu_types, disabled=disabled)
+                col_g1, col_g2 = st.columns([1,1])
+                with col_g1:
+                    gpus = st.number_input("Number of GPUs:", min_value=1, max_value=8, value=1, disabled=disabled)
+                with col_g2:
+                    gpu_types = [
+                        'Any GPU',
+                        'geforce_gtx_1080_ti',
+                        'geforce_rtx_2080_ti',
+                        'geforce_rtx_3090',
+                        'l40s',
+                        'quadro_gp100',
+                        'rtx_a4000',
+                        'rtx_a4500',
+                        'rtx_a6000'
+                    ]
+                    gpu_type = st.selectbox("GPU Type:", gpu_types, disabled=disabled)
             else:
                 gpus = 0
                 gpu_type = None
 
-        max_concurrent_jobs = st.number_input("Max Concurrent Jobs:", min_value=1, max_value=10, value=2, disabled=disabled)
+        st.divider()
 
-        local_test = st.checkbox("Local Test Run (no Slurm, 1 combo, 1 epoch, 1 batch)", disabled=disabled)
-        if local_test:
-            st.info("Local test run will run only the first combination for 1 epoch and break after 1 batch.")
+        st.subheader("Parallelization")
+        col_concurrency, col_test = st.columns([1,1])
+        with col_concurrency:
+            max_concurrent_jobs = st.number_input("Max Concurrent Jobs:", min_value=1, max_value=10, value=2, disabled=disabled)
+        with col_test:
+            local_test = st.checkbox("Local Test Run (no Slurm, 1 combo, 1 epoch, 1 batch)", disabled=disabled)
+            if local_test:
+                st.info("Local test run will run only the first combination for 1 epoch and break after 1 batch.")
 
+        st.write("All chosen combinations will be tested on HPC.")
+
+    # ----------------------------
+    # RUN TAB
+    # ----------------------------
     combos = []
     for ld, ep, bs, lr_val, act, layers in product(
         latent_dims_set, epoch_choices, batch_sizes_cvae, cvae_lr_set, activations, nhl
@@ -215,7 +246,9 @@ def main():
                 f.write(training_file.getvalue())
 
             # Prepare data
-            train_input, val_input, test_input, train_condition, val_condition, test_condition = prepare_cvae_data(data, input_columns, condition_columns)
+            train_input, val_input, test_input, train_condition, val_condition, test_condition = prepare_cvae_data(
+                st.session_state["uploaded_data"], input_columns, condition_columns
+            )
             if train_input is None:
                 st.error("Data preprocessing failed.")
                 return
@@ -297,9 +330,11 @@ def main():
                         st.info("Waiting for jobs to complete...")
 
                         my_bar = st.progress(0)
-                        prev_msg = ""
-
+                        status_placeholder = st.empty()  # Single status line
                         cancel_button = st.button("Cancel Job", disabled=(not st.session_state.get("job_running", False) or st.session_state.get("current_job_id") is None))
+                        
+                        start_time = time.time()
+
                         while st.session_state.get("job_running", False):
                             # Check if user canceled the job
                             if cancel_button and st.session_state.get("current_job_id") is not None:
@@ -328,16 +363,13 @@ def main():
                                 else:
                                     completion_ratio = int((completed_jobs / num_combinations) * 100)
                                     my_bar.progress(completion_ratio)
-                                    msg = f"{completed_jobs}/{num_combinations} done."
-                                    if msg != prev_msg:
-                                        st.info(msg)
-                                        prev_msg = msg
+                                    avg_time_per_job = (time.time() - start_time) / completed_jobs if completed_jobs > 0 else 0
+                                    msg = f"{completed_jobs}/{num_combinations} done. Avg time/job: {avg_time_per_job:.2f}s"
+                                    status_placeholder.info(msg)
                                     print_with_time(msg)
                             else:
                                 msg = "Results file not found yet, waiting..."
-                                if msg != prev_msg:
-                                    st.info(msg)
-                                    prev_msg = msg
+                                status_placeholder.info(msg)
                                 print_with_time(msg)
                             time.sleep(10)
 
